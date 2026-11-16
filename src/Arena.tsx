@@ -3,7 +3,7 @@ import { ArrowLeft, Flag, Maximize2, Minimize2, Plus, Trophy, X } from 'lucide-r
 import { buildBracket, SPORT_NAMES, standings } from './engine';
 import type { Match, Sport, State, Tournament } from './engine';
 import { nextRoundLabel } from './announcement-text';
-import { SpeechControls, useAnnouncementSpeech } from './SpeechControls';
+import { SpeechControls, useAnnouncementSpeech, broadcastSeconds } from './SpeechControls';
 
 export interface Announcement { key: string; drawnAt:string; sport: Sport; match: Match; name: string; opponent: string; college: string; champion: boolean; nextRound:string }
 export function completedChanges(before: State, after: State): Announcement[] {
@@ -15,16 +15,16 @@ export function completedChanges(before: State, after: State): Announcement[] {
       if(!m.result||!m.resolved||m.bye)continue;
       if(JSON.stringify(old.results[m.id])===JSON.stringify(m.result))continue;
       const winner=t.players.find(p=>p.id===m.winner), loser=t.players.find(p=>p.id===(m.winner===m.a.id?m.b.id:m.a.id));
-      changes.push({key:`${sport}-${m.id}-${m.result.updatedAt}`,drawnAt:t.drawnAt,sport,match:m,name:winner?.name??'双方取消资格',opponent:loser?.name??'',college:winner?.college??'',champion:standings(t).champion===m.winner&&!!m.winner,nextRound:nextRoundLabel(m.round,buildBracket(t).length)});
+      changes.push({key:`${sport}-${t.drawnAt}-${m.id}-${m.result.updatedAt}`,drawnAt:t.drawnAt,sport,match:m,name:winner?.name??'双方取消资格',opponent:loser?.name??'',college:winner?.college??'',champion:standings(t).champion===m.winner&&!!m.winner,nextRound:nextRoundLabel(m.round,buildBracket(t).length)});
     }
   }
   return changes;
 }
 export function ResultBroadcast({event,onClose}:{event:Announcement;onClose:()=>void}) {
-  const [seconds,setSeconds]=useState(8);const speaking=useAnnouncementSpeech(event);
-  useEffect(()=>{setSeconds(8);const timer=setInterval(()=>setSeconds(s=>Math.max(0,s-1)),1000);return()=>clearInterval(timer);},[event.key]);
+  const [duration]=useState(()=>broadcastSeconds(event));const [seconds,setSeconds]=useState(duration);const speaking=useAnnouncementSpeech(event);
+  useEffect(()=>{setSeconds(broadcastSeconds(event));const timer=setInterval(()=>setSeconds(s=>Math.max(0,s-1)),1000);return()=>clearInterval(timer);},[event.key]);
   useEffect(()=>{if(seconds<=0&&!speaking)onClose();},[seconds,speaking,onClose]);
-  return <div className={`result-broadcast ${event.champion?'champion-broadcast':''}`} role="dialog" aria-label="赛果播报"><div className="broadcast-rays"/><div className="broadcast-grid"/><button className="broadcast-close" onClick={onClose} aria-label="关闭赛果播报"><X size={22}/></button><div className="broadcast-content"><span className="broadcast-eyebrow">{SPORT_NAMES[event.sport]} / {event.match.label} / {event.match.id}</span><span className="broadcast-trophy"><Trophy size={70} strokeWidth={1}/></span><div className="broadcast-title">{event.champion?'CHAMPION':event.match.winner?'VICTORY':'MATCH CLOSED'}</div><p className="broadcast-subtitle">{event.champion?'巅峰加冕 · 冠军诞生':event.match.winner?'胜负已定 · 恭喜晋级':'裁判判定 · 本场结束'}</p><h2>{event.name}</h2><p className="broadcast-college">{event.college}</p>{event.match.winner&&<div className="broadcast-score"><span>{event.opponent}</span><b>{event.match.result?.kind==='played'?(event.match.winner===event.match.a.id?[event.match.score[1],event.match.score[0]]:event.match.score).join(' : '):event.match.result?.kind==='adjudicated'?'管理员裁定':'弃权判定'}</b><span>{event.name}</span></div>}<div className="broadcast-bottom"><span>THE NEXT MOVE IS YOURS</span><button onClick={onClose}>{seconds<=0&&speaking?'语音播报中，结束后返回':seconds+'s 后返回对阵'} <ArrowLeft size={14}/></button></div></div><div className="broadcast-progress" style={{animationDuration:'8s'}}/>{Array.from({length:36},(_,i)=><i className="energy-spark" key={i} style={{left:`${i*47%100}%`,animationDelay:`${i%9*.13}s`,height:3+i%5*3}}/>)}</div>;
+  return <div className={`result-broadcast ${event.champion?'champion-broadcast':''}`} role="dialog" aria-label="赛果播报"><div className="broadcast-rays"/><div className="broadcast-grid"/><button className="broadcast-close" onClick={onClose} aria-label="关闭赛果播报"><X size={22}/></button><div className="broadcast-content"><span className="broadcast-eyebrow">{SPORT_NAMES[event.sport]} / {event.match.label} / {event.match.id}</span><span className="broadcast-trophy"><Trophy size={70} strokeWidth={1}/></span><div className="broadcast-title">{event.champion?'CHAMPION':event.match.winner?'VICTORY':'MATCH CLOSED'}</div><p className="broadcast-subtitle">{event.champion?'巅峰加冕 · 冠军诞生':event.match.winner?'胜负已定 · 恭喜晋级':'裁判判定 · 本场结束'}</p><h2>{event.name}</h2><p className="broadcast-college">{event.college}</p>{event.match.winner&&<div className="broadcast-score"><span>{event.opponent}</span><b>{event.match.result?.kind==='played'?(event.match.winner===event.match.a.id?[event.match.score[1],event.match.score[0]]:event.match.score).join(' : '):event.match.result?.kind==='adjudicated'?'管理员裁定':'弃权判定'}</b><span>{event.name}</span></div>}<div className="broadcast-bottom"><span>THE NEXT MOVE IS YOURS</span><button onClick={onClose}>{seconds<=0&&speaking?'语音播报中，结束后返回':seconds+'s 后返回对阵'} <ArrowLeft size={14}/></button></div></div><div className="broadcast-progress" style={{animationDuration:duration+'s'}}/>{Array.from({length:36},(_,i)=><i className="energy-spark" key={i} style={{left:`${i*47%100}%`,animationDelay:`${i%9*.13}s`,height:3+i%5*3}}/>)}</div>;
 }
 
 function FitBracket({t,onRecord}:{t:Tournament;onRecord:(sport:Sport,id:string)=>void}) {

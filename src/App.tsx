@@ -9,6 +9,7 @@ import { AccountPanel } from './AccountPanel';
 import { matchSignature, resultAudit } from './cloud-policy';
 import { QuickDecision } from './QuickDecision';
 import { CloudAudit } from './CloudAudit';
+import { AnnouncementQueue } from './announcement-queue';
 import { bestOf, bracketSize, buildBracket, demoState, descendants, draw, emptyState, scoreGames, setResult, SPORT_NAMES, standings, validateState } from './engine';
 import type { Match, Outcome, Player, Prize, Result, Sport, State, Tournament } from './engine';
 import { download, exportResults, importedTournament, readRegistration } from './excel';
@@ -24,7 +25,7 @@ const NAV = [{ id:'overview', label:'赛事总览', icon:LayoutDashboard }, { id
 
 export function App() {
   const [projection,setProjection] = useState(new URLSearchParams(location.search).has('screen'));
-  const cloud=useCloud(); const [saving,setSaving]=useState(false); const [account,setAccount]=useState(false); const [announcement,setAnnouncement]=useState<Announcement|null>(null); const [queueTick,setQueueTick]=useState(0);const queue=useRef<Announcement[]>([]),previous=useRef<State|null>(null),initialRemote=useRef(false),formSignature=useRef('');
+  const cloud=useCloud(); const [saving,setSaving]=useState(false); const [account,setAccount]=useState(false); const [announcement,setAnnouncement]=useState<Announcement|null>(null); const [queueTick,setQueueTick]=useState(0);const queue=useRef(new AnnouncementQueue<Announcement>()),previous=useRef<State|null>(null),initialRemote=useRef(false),formSignature=useRef('');
   const canAdmin=!cloud.enabled||(cloud.profile?.role==='admin'||cloud.profile?.role==='superadmin'),canRecord=!cloud.enabled||cloud.profile?.role==='admin'||cloud.profile?.role==='superadmin'||cloud.profile?.role==='referee';
   const [state, setState] = useState<State>(BOOT.state), stateRef = useRef(state);
   stateRef.current = state;
@@ -41,8 +42,8 @@ export function App() {
   const allCount = matches.length ? matches.filter(m=>!m.bye).length : Math.max(0, tournament.players.length - 1), currentRound = rounds.findIndex(r => r.some(m => !m.resolved));
   const flash = (text: string) => { setNotice(text); setTimeout(() => setNotice(''), 4500); };
   useEffect(()=>{if(cloud.remote){if(!initialRemote.current){previous.current=cloud.remote;initialRemote.current=true;}setState(cloud.remote);}},[cloud.remote]);
-  useEffect(()=>{if(previous.current){const changes=completedChanges(previous.current,state);if(changes.length)setTimeout(()=>{queue.current.push(...changes);setQueueTick(n=>n+1);},2000);}previous.current=state;},[state]);
-  useEffect(()=>{if(!announcement&&queue.current.length){let event=queue.current.shift();while(event){const t=stateRef.current.tournaments[event.sport];if(t.drawnAt===event.drawnAt&&t.results[event.match.id]?.updatedAt===event.match.result?.updatedAt)break;event=queue.current.shift();}if(event){setAnnouncement(event);window.dispatchEvent(new CustomEvent('qi-victory',{detail:event}));}}},[queueTick,announcement]);
+  useEffect(()=>{if(previous.current){const changes=queue.current.reserve(completedChanges(previous.current,state));if(changes.length)setTimeout(()=>{queue.current.append(changes);setQueueTick(n=>n+1);},2000);}previous.current=state;},[state]);
+  useEffect(()=>{if(!announcement){const event=queue.current.next(event=>{const t=stateRef.current.tournaments[event.sport];return t.drawnAt===event.drawnAt&&t.results[event.match.id]?.updatedAt===event.match.result?.updatedAt;});if(event)setAnnouncement(event);}},[queueTick,announcement]);
   useEffect(() => {
     if(cloud.enabled)return;
     const sync = (e: StorageEvent) => { if (e.key !== KEY || !e.newValue) return; try { const next = validateState(JSON.parse(e.newValue)); setState(next); if (!projection) flash('赛事已同步另一窗口的更新。'); } catch { setError('另一窗口的数据异常，请检查备份。'); } };
@@ -146,7 +147,7 @@ export function App() {
     {notice&&<div className="toast" role="status"><CheckCircle2 size={18}/>{notice}<button onClick={()=>setNotice('')} aria-label="关闭提示"><X size={15}/></button></div>}
     {celebrate&&<div className="confetti" aria-hidden="true">{Array.from({length:48},(_,i)=><i key={i} style={{left:`${(i*37)%100}%`,animationDelay:`${(i%8)*.1}s`,background:['#ec784c','#e5bd64','#4c7967','#f0c6ac'][i%4],transform:`rotate(${i*23}deg)`}}/>)}</div>}
     {account&&<Modal title="账号与权限中心" subtitle="管理员邮箱注册 · 裁判由管理员创建 · 手机实时录分" close={()=>setAccount(false)}><AccountPanel profile={cloud.profile} call={cloud.call} onChanged={()=>void cloud.refresh()}/></Modal>}
-    {announcement&&<ResultBroadcast event={announcement} onClose={()=>setAnnouncement(null)}/>}
+    {announcement&&<ResultBroadcast key={announcement.key} event={announcement} onClose={()=>setAnnouncement(null)}/>}
     {saving&&<div className="saving-indicator" role="status">正在提交云端，请稍候…</div>}
   </div>;
 }

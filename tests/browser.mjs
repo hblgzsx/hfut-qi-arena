@@ -79,7 +79,7 @@ try {
   await page.locator('.prize-editor input[type=file]').setInputFiles(prizeImage);
   await page.locator('.prize-visual img').first().waitFor();
   await page.getByRole('button',{name:'保存奖品',exact:true}).click();assert.ok(await page.getByRole('heading',{name:'冠军蓝牙耳机'}).count());
-  await screen.getByRole('button',{name:'荣誉奖品',exact:true}).click();
+  await screen.getByRole('button',{name:'荣耀奖品',exact:true}).click();
   await screen.getByRole('heading',{name:'冠军蓝牙耳机'}).waitFor();
   assert.equal(await screen.locator('.arena').count(),0);
   assert.ok((await screen.locator('.prize-visual img').first().getAttribute('src')).startsWith('data:image/webp;base64,'));

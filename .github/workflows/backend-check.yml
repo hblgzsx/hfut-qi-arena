@@ -6,6 +6,7 @@ on:
       - 'supabase/**'
       - 'src/engine.ts'
       - 'src/cloud-policy.ts'
+      - 'src/access-policy.ts'
       - '.github/workflows/backend-check.yml'
   workflow_dispatch:
 permissions:

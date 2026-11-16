@@ -7,7 +7,7 @@ const url=env.VITE_SUPABASE_URL??'',key=env.VITE_SUPABASE_PUBLISHABLE_KEY??'';
 export const eventId=env.VITE_EVENT_ID||'hfut-2026';
 export const cloudEnabled=!!url&&!!key;
 export const supabase=cloudEnabled?createClient(url,key):null;
-export interface Profile { id:string; display_name:string; email:string; role:'pending'|'referee'|'admin'|'blocked' }
+export interface Profile { id:string; display_name:string; email:string; role:'pending'|'referee'|'admin'|'superadmin'|'blocked' }
 export function useCloud() {
   const [remote,setRemote]=useState<State|null>(null),[profile,setProfile]=useState<Profile|null>(null),[status,setStatus]=useState(cloudEnabled?'正在连接云端':'本地离线'),[loading,setLoading]=useState(cloudEnabled);
   const generation=useRef(0);
@@ -24,7 +24,7 @@ export function useCloud() {
       const {data:{session}}=await supabase.auth.getSession();
       let next:State,p:Profile|null=null;
       if(session){const data=await call('read');next=validateState(data.state);p=data.profile;}
-      else {const {data,error}=await supabase.from('public_events').select('state').eq('id',eventId).maybeSingle();if(error)throw error;if(!data)throw new Error('云端赛事尚未初始化，请先运行数据库脚本并部署函数。');next=validateState(data.state);}
+      else {if(n===generation.current)setProfile(null);const {data,error}=await supabase.from('public_events').select('state').eq('id',eventId).maybeSingle();if(error)throw error;if(!data)throw new Error('云端赛事尚未初始化，请先运行数据库脚本并部署函数。');next=validateState(data.state);}
       if(n===generation.current){setRemote(next);setProfile(p);setStatus('云端已同步');setLoading(false);}
     }catch(e){if(n===generation.current){setStatus(`连接失败：${(e as Error).message}`);setLoading(false);}}
   },[call]);

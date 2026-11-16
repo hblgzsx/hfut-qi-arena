@@ -41,7 +41,7 @@ try{
   assert.ok(audit.includes('→'));assert.ok(audit.includes('本地超级管理员'));assert.ok(audit.includes('核对纸质记录'));
   await page.getByRole('button',{name:'关闭赛果播报'}).click();
   await page.getByRole('button',{name:'退出展示',exact:true}).click();assert.equal(await page.locator('.arena').count(),0);
-  await page.getByRole('button',{name:'裁判登录 / 注册',exact:true}).click();assert.ok(await page.getByText('云端尚未配置',{exact:true}).count());await page.getByRole('button',{name:'关闭弹窗'}).click();
+  await page.getByRole('button',{name:'邮箱登录 / 管理员注册',exact:true}).click();assert.ok(await page.getByText('云端尚未配置',{exact:true}).count());await page.getByRole('button',{name:'关闭弹窗'}).click();
   // Create a dense 64+64 player scenario in the isolated test browser, never in user's browser.
   await page.evaluate(()=>{const state=JSON.parse(localStorage.getItem('qi-arena-v1'));for(const sport of ['gomoku','junqi']){const t=state.tournaments[sport];t.players=Array.from({length:64},(_,i)=>({id:`${sport}-${i}`,name:`选手${String(i+1).padStart(2,'0')}`,studentId:`${sport}-${i}`,college:'计算机与信息学院',phone:'',qq:'',gender:''}));t.seeds=t.players.map(p=>p.id);t.results={};t.drawnAt='64-test';}localStorage.setItem('qi-arena-v1',JSON.stringify(state));});
   await page.goto(`${url}/?screen=1&view=both`);await page.locator('.arena-sport-junqi .fit-name').first().waitFor();

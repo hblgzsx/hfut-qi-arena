@@ -21,7 +21,7 @@ try {
  await page.locator('.arena-clock').getByText('云端已同步',{exact:true}).waitFor();
  const second=await context.newPage();await second.goto('http://127.0.0.1:4173/?screen=1&view=both');await second.locator('.arena-clock').getByText('云端已同步',{exact:true}).waitFor();
  const controller=await context.newPage();await controller.goto('http://127.0.0.1:4173/');await controller.locator('.local-badge').getByText('云端已同步',{exact:true}).waitFor();
- state=next;await second.evaluate(()=>window.dispatchEvent(new Event('online')));await controller.evaluate(()=>window.dispatchEvent(new Event('online')));await page.evaluate(()=>window.dispatchEvent(new Event('online')));
+ next.tournaments.gomoku.results[m.id].updatedAt=new Date().toISOString();state=next;await second.evaluate(()=>window.dispatchEvent(new Event('online')));await controller.evaluate(()=>window.dispatchEvent(new Event('online')));await page.evaluate(()=>window.dispatchEvent(new Event('online')));
  let popup=page.getByRole('dialog',{name:'赛果播报'});
  await popup.waitFor();await page.waitForTimeout(300);if(await second.evaluate(()=>window.__speeches.length))popup=second.getByRole('dialog',{name:'赛果播报'});
  assert.equal(await page.evaluate(()=>window.__speeches.length)+await second.evaluate(()=>window.__speeches.length),1);assert.equal(await controller.evaluate(()=>window.__speeches.length),0);
@@ -37,5 +37,14 @@ try {
  assert.equal(await page.evaluate(()=>window.__popups),1,'Repeated snapshots must not reopen popup');
  assert.equal(await page.evaluate(()=>window.__speeches.length)+await second.evaluate(()=>window.__speeches.length),1);assert.equal(await controller.evaluate(()=>window.__speeches.length),0);
  assert.equal(await popup.count(),0);
+ // A new server timestamp with the same actual score must not repeat speech.
+ state=structuredClone(next);state.tournaments.gomoku.results[m.id].updatedAt='2030-01-01T00:00:00.000Z';state.revision=crypto.randomUUID();
+ await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.waitForTimeout(2500);
+ assert.equal(await page.evaluate(()=>window.__speeches.length)+await second.evaluate(()=>window.__speeches.length),1);
+ await page.getByRole('button',{name:'跳过后续演示播报'}).click();
+ assert.equal(await page.getByRole('dialog',{name:'赛果播报'}).count(),0);
+ state=structuredClone(next);state.tournaments.gomoku.results[m.id].updatedAt='2030-01-02T00:00:00.000Z';state.revision=crypto.randomUUID();
+ await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.waitForTimeout(2500);
+ assert.equal(await page.getByRole('dialog',{name:'赛果播报'}).count(),0);
  console.log('PASS: repeated/stale/metadata snapshots produce exactly one popup per display and one utterance across two screens; controller is silent; 30-second voice finishes inside that popup.');
 } finally {await browser.close();}

@@ -12,8 +12,9 @@ try {
  await context.addInitScript(()=>{
   localStorage.setItem('qi-arena-speech-v1',JSON.stringify({enabled:true,voice:'',style:'standard',duration:8}));
   window.__speeches=[];window.__popups=0;
+  window.SpeechSynthesisUtterance=class{constructor(text){this.text=text;}};
   let timer;
-  Object.defineProperty(window,'speechSynthesis',{configurable:true,value:{getVoices:()=>[],addEventListener(){},removeEventListener(){},cancel(){clearTimeout(timer);},speak(u){window.__speeches.push(u.text);timer=setTimeout(()=>u.onend?.(),30000);}}});
+  Object.defineProperty(window,'speechSynthesis',{configurable:true,value:{getVoices:()=>[{name:'Microsoft Huihui',voiceURI:'huihui',lang:'zh-CN',localService:true}],addEventListener(){},removeEventListener(){},cancel(){clearTimeout(timer);},speak(u){window.__speeches.push(u.text);timer=setTimeout(()=>u.onend?.(),30000);}}});
   document.addEventListener('DOMContentLoaded',()=>new MutationObserver(records=>{for(const r of records)for(const n of r.addedNodes)if(n instanceof Element){if(n.matches('.result-broadcast'))window.__popups++;window.__popups+=n.querySelectorAll('.result-broadcast').length;}}).observe(document.body,{childList:true,subtree:true}));
  });
  await context.route('https://nwvxamfgfbqbmamqfjcr.supabase.co/rest/v1/public_events*',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({state})}));

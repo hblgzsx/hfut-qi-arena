@@ -1,0 +1,5 @@
+project_id = "hfut-qi-arena"
+
+[functions.tournament]
+# JWT is verified explicitly with auth.getUser inside the function, compatible with publishable keys.
+verify_jwt = false

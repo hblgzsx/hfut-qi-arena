@@ -4,4 +4,5 @@ import { App } from './App';
 import './style.css';
 import './refinements.css';
 import './arena.css';
+import './competition.css';
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);

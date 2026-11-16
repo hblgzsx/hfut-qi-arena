@@ -13,16 +13,24 @@ function speak(text:string,p:Preferences,onDone:()=>void){
   const voice=chooseVoice(voices,p.gender,p.voice);if(p.gender!=='auto'&&!voice)throw new Error('当前设备缺少所选性别的中文音色，请安装语音包或更换浏览器。');u.voice=voice||null;u.lang=u.voice?.lang||'zh-CN';u.rate=styles[p.style].rate;u.pitch=styles[p.style].pitch;u.onend=onDone;u.onerror=onDone;speechSynthesis.cancel();speechSynthesis.speak(u);return u;
 }
 export function broadcastSeconds(event:SpokenResult){const p=readPreferences();return p.enabled?Math.max(p.duration,Math.ceil(announcementText(event).length/(4*styles[p.style].rate))+3):p.duration;}
-export function useAnnouncementSpeech(event:SpokenResult&{key:string}){
+export function useAnnouncementSpeech(event:SpokenResult&{key:string},enabled=true){
   const [speaking,setSpeaking]=useState(false);
-  useEffect(()=>{const p=readPreferences();if(!p.enabled||!('speechSynthesis' in window))return;
-    let active=true,finishTimer:ReturnType<typeof setTimeout>,watchdog:ReturnType<typeof setTimeout>;
-    // Defer actual playback so StrictMode's setup/cleanup cycle cannot start the utterance twice.
-    const start=setTimeout(()=>{if(!active)return;setSpeaking(true);const done=()=>{if(active)finishTimer=setTimeout(()=>{if(active)setSpeaking(false);},1200);};
+  useEffect(()=>{const p=readPreferences();if(!enabled||!p.enabled||!('speechSynthesis' in window))return;
+    let active=true,started=false,release:(()=>void)|undefined,finishTimer:ReturnType<typeof setTimeout>,watchdog:ReturnType<typeof setTimeout>;
+    const marker='qi-arena-spoken-v2:'+event.key;
+    const play=()=>new Promise<void>(resolve=>{
+      release=resolve;if(!active){resolve();return;}
+      // Shared across control windows and displays; a reload cannot repeat the same result.
+      try{if(localStorage.getItem(marker)){resolve();return;}localStorage.setItem(marker,String(Date.now()));}catch{}
+      started=true;setSpeaking(true);const done=()=>{if(active)finishTimer=setTimeout(()=>{if(active)setSpeaking(false);resolve();},1200);else resolve();};
       try{speak(announcementText(event),p,done);watchdog=setTimeout(()=>{if(active){speechSynthesis.cancel();done();}},90000);}catch{done();}
-    },50);
-    return()=>{active=false;clearTimeout(start);clearTimeout(finishTimer);clearTimeout(watchdog);speechSynthesis.cancel();};
-  },[event.key]);
+    });
+    const start=setTimeout(()=>{if(!active)return;
+      if(navigator.locks)void navigator.locks.request('qi-arena-voice:'+event.key,async()=>{if(active)await play();});
+      else void play();
+    },100);
+    return()=>{active=false;clearTimeout(start);clearTimeout(finishTimer);clearTimeout(watchdog);if(started)speechSynthesis.cancel();release?.();};
+  },[event.key,enabled]);
   return speaking;
 }
 export function SpeechControls(){

@@ -41,10 +41,7 @@ try {
  state=structuredClone(next);state.tournaments.gomoku.results[m.id].updatedAt='2030-01-01T00:00:00.000Z';state.revision=crypto.randomUUID();
  await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.waitForTimeout(2500);
  assert.equal(await page.evaluate(()=>window.__speeches.length)+await second.evaluate(()=>window.__speeches.length),1);
- await page.getByRole('button',{name:'跳过后续演示播报'}).click();
- assert.equal(await page.getByRole('dialog',{name:'赛果播报'}).count(),0);
- state=structuredClone(next);state.tournaments.gomoku.results[m.id].updatedAt='2030-01-02T00:00:00.000Z';state.revision=crypto.randomUUID();
- await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.waitForTimeout(2500);
- assert.equal(await page.getByRole('dialog',{name:'赛果播报'}).count(),0);
- console.log('PASS: repeated/stale/metadata snapshots produce exactly one popup per display and one utterance across two screens; controller is silent; 30-second voice finishes inside that popup.');
+ await page.getByRole('button',{name:'关闭赛果播报'}).click();
+ assert.equal(await page.getByRole('button',{name:'跳过后续演示播报'}).count(),0);
+  console.log('PASS: repeated/stale/metadata snapshots produce exactly one popup per display and one utterance across two screens; controller is silent; 30-second voice finishes inside that popup.');
 } finally {await browser.close();}

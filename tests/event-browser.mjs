@@ -17,9 +17,10 @@ try{
  assert.equal(await page.locator('.hero-venue').textContent(),'学术报告厅 201');assert.match(await page.locator('.breadcrumb').textContent(),/春季研究生棋类竞赛/);
  await page.reload();await page.locator('.hero-venue').getByText('学术报告厅 201').waitFor();
  const screen=await context.newPage();await screen.goto('http://127.0.0.1:4173/?screen=1');await screen.locator('.arena-title h1').getByText('春季研究生棋类竞赛',{exact:false}).waitFor();assert.match(await screen.locator('.arena-title').textContent(),/学术报告厅 201/);await screen.close();
- await page.getByRole('button',{name:'添加竞赛',exact:true}).click();form=page.locator('.event-form');await form.getByLabel('比赛名称',{exact:true}).fill('全新正式竞赛');await form.getByRole('button',{name:'下一步：确认创建'}).click();
+ await page.getByRole('button',{name:'添加竞赛',exact:true}).click();form=page.locator('.event-form');await form.getByLabel('比赛名称',{exact:true}).fill('原竞赛');await form.getByRole('button',{name:'下一步：确认创建'}).click();await form.getByRole('alert').getByText(/同名竞赛/).waitFor();assert.equal(creates,0);
+ await form.getByLabel('比赛名称',{exact:true}).fill('全新第二届竞赛');await form.getByRole('button',{name:'下一步：确认创建'}).click();
  assert.equal(saves,1,'No reset before confirmation');await page.getByRole('button',{name:'取消',exact:true}).click();assert.equal(state.tournaments.gomoku.players.length,16);
  await form.getByRole('button',{name:'下一步：确认创建'}).click();await page.getByRole('button',{name:'确认创建竞赛',exact:false}).click();await page.waitForURL('**event=event-test');await page.locator('.hero-venue').waitFor();
- assert.equal(saves,1);assert.equal(creates,1);assert.equal(records.get('hfut-2026').tournaments.gomoku.players.length,16);assert.equal(state.event.name,'全新正式竞赛');assert.equal(state.tournaments.gomoku.players.length,0);assert.equal(state.tournaments.junqi.players.length,0);assert.equal(state.tournaments.gomoku.demo,false);
+ assert.equal(saves,1);assert.equal(creates,1);assert.equal(records.get('hfut-2026').tournaments.gomoku.players.length,16);assert.equal(state.event.name,'全新第二届竞赛');assert.equal(state.tournaments.gomoku.players.length,0);assert.equal(state.tournaments.junqi.players.length,0);assert.equal(state.tournaments.gomoku.demo,false);
  console.log('PASS: edit preserves scores; colleges/time/venue persist and reach display; new competition requires confirmation then starts independently without overwriting history.');
 }finally{await browser.close();}

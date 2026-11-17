@@ -1,6 +1,9 @@
 export interface EventSettings { name:string; colleges:string[]; startsAt:string; endsAt:string; venue:string }
 export const COLLEGES=['经济学院','计算机与信息学院','建筑与艺术学院','外国语学院','微电子学院'];
+export const eventNameKey=(name:string)=>name.replace(/[\s\u3000]+/g,'').toLowerCase();
+export function assertUniqueEventName(name:string,events:{id:string;name:string}[],exceptId?:string){if(events.some(e=>e.id!==exceptId&&eventNameKey(e.name)===eventNameKey(name)))throw new Error('已存在同名竞赛，请使用其他比赛名称。');}
 export function defaultEvent():EventSettings{return {name:'五院研究生棋类友谊赛',colleges:[...COLLEGES],startsAt:'2026-11-29T14:00',endsAt:'2026-11-29T18:00',venue:'科教楼 B 座 501 报告厅'};}
+export function eventIsActive(event:Pick<EventSettings,'startsAt'|'endsAt'>=defaultEvent(),now=Date.now()){return now>=Date.parse(event.startsAt+'+08:00')&&now<Date.parse(event.endsAt+'+08:00');}
 export function validateEvent(value:unknown):EventSettings{
  const v=value as EventSettings;
  if(!v||typeof v.name!=='string'||!v.name.trim()||v.name.length>60||typeof v.venue!=='string'||!v.venue.trim()||v.venue.length>120)throw new Error('比赛名称需为 1—60 字，地点需为 1—120 字。');

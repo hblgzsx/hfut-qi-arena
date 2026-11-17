@@ -3,12 +3,14 @@ import { LogIn, ShieldCheck, UserPlus } from 'lucide-react';
 import { cloudEnabled, supabase } from './cloud';
 import type { Profile } from './cloud';
 import { canGrantRole, isAdministrator } from './access-policy';
+import {BulkReferees} from './BulkReferees';
 
 const labels:Record<Profile['role'],string>={superadmin:'超级管理员',admin:'赛事管理员',referee:'裁判',pending:'管理员申请待授权',blocked:'账号已停用'};
 type Credential={email:string;password:string;displayName:string};
-export function AccountPanel({profile,call,onChanged}:{profile:Profile|null;call:(a:string,p?:Record<string,unknown>)=>Promise<any>;onChanged:()=>void}) {
+export function AccountPanel({profile,call,onChanged,onWorkState}:{profile:Profile|null;call:(a:string,p?:Record<string,unknown>)=>Promise<any>;onChanged:()=>void;onWorkState?:(busy:boolean,unsaved:boolean)=>void}) {
   const [register,setRegister]=useState(false),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[name,setName]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[people,setPeople]=useState<Profile[]>([]);
   const [refEmail,setRefEmail]=useState(''),[refName,setRefName]=useState(''),[credential,setCredential]=useState<Credential|null>(null);
+  const [unsavedBatch,setUnsavedBatch]=useState(false);useEffect(()=>{onWorkState?.(busy,unsavedBatch);},[busy,unsavedBatch]);
   async function list(){try{const d=await call('members');setPeople(d.profiles);}catch(e){setMessage((e as Error).message);}}
   useEffect(()=>{if(isAdministrator(profile?.role))void list();else setPeople([]);setCredential(null);},[profile?.id,profile?.role]);
   if(!cloudEnabled)return <div className="account-offline"><ShieldCheck size={38}/><h3>云端尚未配置</h3><p>本地演示可以体验展示与录分。跨设备同步、管理员注册和管理员创建裁判账号需要连接 Supabase 后端。</p></div>;
@@ -22,6 +24,7 @@ export function AccountPanel({profile,call,onChanged}:{profile:Profile|null;call
     <div className="account-status"><ShieldCheck size={30}/><h3>{profile.display_name}</h3><p>{profile.email}</p><span className="status-pill green">{labels[profile.role]}</span></div>
     {profile.role==='pending'&&<div className="info-note">管理员申请等待超级管理员授权，当前可以观看赛事。裁判账号由管理员创建，无需自行注册。</div>}
     {isAdministrator(profile.role)&&<>
+      <BulkReferees call={call} onChanged={()=>void list()} onBusyChange={setBusy} onCredentialsChange={setUnsavedBatch}/>
       <form onSubmit={e=>{e.preventDefault();void run(async()=>{setCredential(null);const data=await call('create-referee',{email:refEmail,displayName:refName});setCredential(data.credential);setRefEmail('');setRefName('');await list();});}}>
         <h3>创建裁判账号</h3><p>系统生成随机密码，裁判使用邮箱和该密码登录。不会发送邀请邮件。</p>
         <label className="form-label">裁判姓名<input required maxLength={40} value={refName} onChange={e=>setRefName(e.target.value)}/></label>

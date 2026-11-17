@@ -1,8 +1,11 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import {ThemeToggle} from './ThemeToggle';
 import './style.css';
 import './refinements.css';
 import './arena.css';
 import './competition.css';
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
+import './theme-light.css';
+import './theme.css';
+createRoot(document.getElementById('root')!).render(<React.StrictMode><App /><ThemeToggle/></React.StrictMode>);

@@ -4,6 +4,7 @@ import { applyCloudScore, redactState } from '../../../src/cloud-policy.ts';
 import type { Sport } from '../../../src/engine.ts';
 import { canGrantRole, isAdministrator, randomRefereePassword } from '../../../src/access-policy.ts';
 import type { AccountRole } from '../../../src/access-policy.ts';
+import {defaultEvent,eventIsActive} from '../../../src/event-settings.ts';
 
 const db=createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,{auth:{persistSession:false}});
 const allowed=Deno.env.get('ALLOWED_ORIGIN')||'*';
@@ -25,9 +26,10 @@ Deno.serve(async req=>{
     const admin=isAdministrator(profile.role),referee=profile.role==='referee';
     if(body.action==='events'){
       if(!admin&&!referee)return reply({error:'请使用已授权账号'},403);
-      const {data,error}=await db.from('public_events').select('id,state').order('updated_at',{ascending:false}).limit(100);
+      const {data,error}=await db.from('private_events').select('id,state,deleted_at').order('updated_at',{ascending:false}).limit(1000);
       if(error)throw error;
-      return reply({events:(data??[]).map(row=>({id:row.id,name:row.state?.event?.name??'五院研究生棋类友谊赛',startsAt:row.state?.event?.startsAt??'2026-11-29T14:00'}))});
+      const now=Date.now(),items=(data??[]).map(row=>({id:row.id,name:row.state?.event?.name??'五院研究生棋类友谊赛',startsAt:row.state?.event?.startsAt??defaultEvent().startsAt,endsAt:row.state?.event?.endsAt??defaultEvent().endsAt,revision:row.state?.revision,deletedAt:row.deleted_at}));
+      return reply({events:items.filter(row=>!row.deletedAt&&(admin||eventIsActive(row,now))),deletedEvents:admin?items.filter(row=>row.deletedAt):[],serverNow:now});
     }
     if(body.action==='create-event'){
       if(!admin)return reply({error:'仅管理员可以创建竞赛'},403);
@@ -35,9 +37,20 @@ Deno.serve(async req=>{
       if(!next.event||Object.values(next.tournaments).some(t=>t.players.length||t.seeds.length||Object.keys(t.results).length))return reply({error:'请以完整基本信息创建空白竞赛'},400);
       const newId='event-'+crypto.randomUUID();next.revision=crypto.randomUUID();
       next.audit=[{id:crypto.randomUUID(),time:new Date().toISOString(),sport:'gomoku',message:'已创建独立竞赛：'+next.event.name+' · '+profile.display_name}];
-      const {error:insertError}=await db.from('private_events').insert({id:newId,state:next});if(insertError)throw insertError;
-      const {data,error}=await db.rpc('arena_commit',{p_id:newId,p_revision:next.revision,p_state:next,p_public:redactState(next,'public'),p_actor:user.id});if(error)throw error;if(!data)throw new Error('竞赛发布失败，请刷新竞赛列表后重试');
+      const {data,error}=await db.rpc('arena_create_event',{p_id:newId,p_state:next,p_public:redactState(next,'public'),p_actor:user.id});if(error)throw error;if(!data)throw new Error('竞赛发布失败，请刷新竞赛列表后重试');
       return reply({eventId:newId,state:next});
+    }
+    if(body.action==='delete-event'||body.action==='restore-event'){
+      if(!admin)return reply({error:'仅管理员可以删除或恢复竞赛'},403);
+      const {data:row,error:readError}=await db.from('private_events').select('state,deleted_at').eq('id',eventId).maybeSingle();if(readError)throw readError;
+      if(!row)return reply({error:'竞赛不存在'},404);
+      const current=validateState(row.state),name=current.event?.name??'五院研究生棋类友谊赛',deleting=body.action==='delete-event';
+      if(body.confirmName!==name)return reply({error:'比赛名称不一致，请重新确认'},400);
+      if(body.expectedRevision!==current.revision||Boolean(row.deleted_at)===deleting)return reply({error:'竞赛已更新或状态已改变，请刷新后重新确认'},409);
+      const next={...current,revision:crypto.randomUUID(),audit:[{id:crypto.randomUUID(),time:new Date().toISOString(),sport:'gomoku' as Sport,message:(deleting?'已删除竞赛（可恢复）：':'已恢复竞赛：')+name+' · '+profile.display_name},...current.audit].slice(0,200)};
+      const {data,error}=await db.rpc('arena_set_event_deleted',{p_id:eventId,p_revision:current.revision,p_name:name,p_deleted:deleting,p_state:next,p_public:redactState(next,'public'),p_actor:user.id});if(error)throw error;
+      if(!data)return reply({error:'竞赛已更新，请刷新后重新确认'},409);
+      return reply({ok:true});
     }
     if(body.action==='create-referee'){
       if(!admin)return reply({error:'仅管理员可以创建裁判账号'},403);
@@ -72,15 +85,24 @@ Deno.serve(async req=>{
       if(!target||!canGrantRole({id:user.id,role:profile.role as AccountRole},target,body.role))return reply({error:'权限不足：仅超级管理员可授权管理员或超级管理员，不能修改自身权限。'},403);
       const {data,error}=await db.from('profiles').update({role:body.role}).eq('id',target.id).select('id');if(error)throw error;if(!data?.length)return reply({error:'账号不存在'},400);return reply({ok:true});
     }
-    const load=async()=>{const {data,error}=await db.from('private_events').select('state').eq('id',eventId).maybeSingle();if(error)throw error;return data?.state?validateState(data.state):null;};
+    const load=async()=>{const {data,error}=await db.from('private_events').select('state').eq('id',eventId).is('deleted_at',null).maybeSingle();if(error)throw error;return data?.state?validateState(data.state):null;};
     let state=await load();
+    if(state&&referee&&!eventIsActive(state.event??defaultEvent())){
+      if(body.action==='read')return reply({state:emptyState(),profile,unavailable:true});
+      return reply({error:'当前不在比赛举行时间内，裁判只能为进行中的竞赛录分。'},403);
+    }
     if(!state&&admin){
+      const {data:existing,error:existingError}=await db.from('private_events').select('id,deleted_at').eq('id',eventId).maybeSingle();if(existingError)throw existingError;
+      if(existing?.deleted_at||eventId!=='hfut-2026'){
+        if(body.action==='read')return reply({state:emptyState(),profile,unavailable:true});
+        return reply({error:'此竞赛已删除或不存在，请切换竞赛或从已删除竞赛中恢复。'},404);
+      }
       const init=emptyState();const {error}=await db.from('private_events').insert({id:eventId,state:init});
       if(error&&error.code!=='23505')throw error;
       state=await load();
       if(state){const {error:publishError}=await db.rpc('arena_commit',{p_id:eventId,p_revision:state.revision,p_state:state,p_public:redactState(state,'public')});if(publishError)throw publishError;}
     }
-    if(body.action==='read')return reply({state:state?redactState(state,admin?'admin':referee?'referee':'public'):emptyState(),profile});
+    if(body.action==='read')return reply({state:state?redactState(state,admin?'admin':referee?'referee':'public'):emptyState(),profile,unavailable:!state});
     if(!state)return reply({error:'请先由管理员初始化赛事'},400);
     if(body.action==='replace'){
       if(!admin)return reply({error:'仅管理员可以修改名单、抽签、奖品与赛事设置'},403);
@@ -93,7 +115,8 @@ Deno.serve(async req=>{
       if(!admin&&!referee)return reply({error:'账号尚未通过管理员审核，不能录分'},403);
       for(let attempt=0;attempt<4;attempt++){
         if(attempt)state=await load();if(!state)throw new Error('赛事不存在');
-        const next=applyCloudScore(state,body,admin?'admin':'referee',profile.display_name);
+        if(referee&&!eventIsActive(state.event??defaultEvent()))return reply({error:'比赛已结束，裁判不能继续录分，请联系管理员。'},403);
+        const next=applyCloudScore(state,body,profile.role==='superadmin'?'superadmin':admin?'admin':'referee',profile.display_name);
         const {data,error}=await db.rpc('arena_commit',{p_id:eventId,p_revision:state.revision,p_state:next,p_public:redactState(next,'public'),p_actor:user.id});if(error)throw error;
         if(data)return reply({state:redactState(next,admin?'admin':'referee')});
       }

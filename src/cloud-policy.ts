@@ -14,14 +14,15 @@ export function redactState(s:State,role:'public'|'referee'|'admin'):State {
   }
   return result;
 }
-export function applyCloudScore(state:State,input:{sport:Sport;id:string;result:Result|null;expectedSignature:string},role:'admin'|'referee',referee:string):State {
+export function scoreReferee(previous:Result|undefined,role:'superadmin'|'admin'|'referee',actor:string){return role==='superadmin'?(previous?.referee.trim()||'超级管理员'):actor.slice(0,40);}
+export function applyCloudScore(state:State,input:{sport:Sport;id:string;result:Result|null;expectedSignature:string},role:'superadmin'|'admin'|'referee',referee:string):State {
   const {sport,id}=input;if(!['gomoku','junqi'].includes(sport)||typeof id!=='string')throw new Error('无效项目或场次。');
   if(matchSignature(state,sport,id)!==input.expectedSignature)throw new Error('此场比赛已被其他裁判更新，或参赛双方已改变。请重新打开对局后录入。');
   const t=state.tournaments[sport],m=buildBracket(t).flat().find(m=>m.id===id);
   if(!m?.ready)throw new Error('本场双方尚未确定。');
   if(role==='referee'&&(m.resolved||!input.result))throw new Error('已结束比赛的更正和撤销须由管理员处理。');
   if(role==='referee'&&input.result?.kind==='adjudicated')throw new Error('直接裁定胜方仅管理员可操作。');
-  const r=input.result?{...input.result,referee:referee.slice(0,40),updatedAt:new Date().toISOString()}:null;
+  const r=input.result?{...input.result,referee:scoreReferee(t.results[id],role,referee),updatedAt:new Date().toISOString()}:null;
   if(r&&(typeof r.reason!=='string'||r.reason.length>200||!Array.isArray(r.games)))throw new Error('赛果格式不正确。');
   const next={...state,revision:crypto.randomUUID(),tournaments:{...state.tournaments,[sport]:setResult(t,id,r)}};
   next.audit=[{id:crypto.randomUUID(),sport,time:new Date().toISOString(),message:resultAudit(state,sport,id,r,referee)},...next.audit].slice(0,200);

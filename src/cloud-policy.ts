@@ -2,14 +2,14 @@ import { buildBracket, setResult, validateState } from './engine.ts';
 import type { Result, Sport, State } from './engine.ts';
 export function matchSignature(s:State,sport:Sport,id:string):string {
   const t=s.tournaments[sport],m=buildBracket(t).flat().find(m=>m.id===id);
-  return JSON.stringify([t.drawnAt,m?.a.id,m?.b.id,t.results[id]??null]);
+  return JSON.stringify([t.drawnAt,m?.a.id,m?.b.id,m?.bestOf,t.results[id]??null]);
 }
 export function redactState(s:State,role:'public'|'referee'|'admin'):State {
-  if(role==='admin')return structuredClone(s);
+  if(role==='admin'){const result=structuredClone(s);for(const t of Object.values(result.tournaments))t.players=t.players.map(p=>{const {phone,qq,...safe}=p;void phone;void qq;return safe as typeof p;});return result;}
   const result=structuredClone(s);result.audit=[];
   for(const sport of ['gomoku','junqi'] as Sport[]){
     const t=result.tournaments[sport];
-    t.players=t.players.map(p=>({...p,studentId:role==='public'?p.id:p.studentId,phone:'',qq:'',gender:''}));
+    t.players=t.players.map(p=>{const {phone,qq,...safe}=p;void phone;void qq;return {...safe,studentId:role==='public'?p.id:p.studentId,gender:''} as typeof p;});
     if(role==='public')for(const r of Object.values(t.results)){r.referee='赛事裁判';r.reason=r.kind==='played'?'':'裁判判定';}
   }
   return result;

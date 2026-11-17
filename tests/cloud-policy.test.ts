@@ -7,7 +7,7 @@ const r:Result={kind:'played',games:['A'],referee:'伪造姓名',reason:'',first
 test('公开快照与裁判资料脱敏，完整名单保留在管理端',()=>{
   const s=demoState();s.tournaments.gomoku.players[0].phone='13800000000';s.tournaments.gomoku.players[0].qq='12345678';
   const pub=redactState(s,'public'),ref=redactState(s,'referee'),admin=redactState(s,'admin');
-  assert.ok(!JSON.stringify(pub).includes('13800000000'));assert.ok(!JSON.stringify(pub).includes('2026010001'));assert.ok(!JSON.stringify(ref).includes('13800000000'));assert.equal(ref.tournaments.gomoku.players[0].studentId,'2026010001');assert.equal(admin.tournaments.gomoku.players[0].phone,'13800000000');assert.doesNotThrow(()=>validateState(pub));assert.equal(s.tournaments.gomoku.players[0].phone,'13800000000');
+  assert.ok(!JSON.stringify(pub).includes('13800000000'));assert.ok(!JSON.stringify(pub).includes('2026010001'));assert.ok(!JSON.stringify(ref).includes('13800000000'));assert.equal(ref.tournaments.gomoku.players[0].studentId,'2026010001');assert.equal(admin.tournaments.gomoku.players[0].phone,undefined);assert.doesNotThrow(()=>validateState(pub));assert.equal(s.tournaments.gomoku.players[0].phone,'13800000000');
 });
 test('裁判提交绑定已登录身份，过期签名和已结束对局更正被拒绝',()=>{
   const s=demoState(),m=buildBracket(s.tournaments.gomoku).flat().find(m=>m.ready&&!m.resolved)!;

@@ -23,6 +23,22 @@ Deno.serve(async req=>{
     const {data:profile,error:profileError}=await db.from('profiles').select('id,email,display_name,role').eq('id',user.id).single();
     if(profileError||!profile)return reply({error:'账号尚未建立裁判资料，请联系管理员'},403);
     const admin=isAdministrator(profile.role),referee=profile.role==='referee';
+    if(body.action==='events'){
+      if(!admin&&!referee)return reply({error:'请使用已授权账号'},403);
+      const {data,error}=await db.from('public_events').select('id,state').order('updated_at',{ascending:false}).limit(100);
+      if(error)throw error;
+      return reply({events:(data??[]).map(row=>({id:row.id,name:row.state?.event?.name??'五院研究生棋类友谊赛',startsAt:row.state?.event?.startsAt??'2026-11-29T14:00'}))});
+    }
+    if(body.action==='create-event'){
+      if(!admin)return reply({error:'仅管理员可以创建竞赛'},403);
+      const next=validateState(body.state);
+      if(!next.event||Object.values(next.tournaments).some(t=>t.players.length||t.seeds.length||Object.keys(t.results).length))return reply({error:'请以完整基本信息创建空白竞赛'},400);
+      const newId='event-'+crypto.randomUUID();next.revision=crypto.randomUUID();
+      next.audit=[{id:crypto.randomUUID(),time:new Date().toISOString(),sport:'gomoku',message:'已创建独立竞赛：'+next.event.name+' · '+profile.display_name}];
+      const {error:insertError}=await db.from('private_events').insert({id:newId,state:next});if(insertError)throw insertError;
+      const {data,error}=await db.rpc('arena_commit',{p_id:newId,p_revision:next.revision,p_state:next,p_public:redactState(next,'public'),p_actor:user.id});if(error)throw error;if(!data)throw new Error('竞赛发布失败，请刷新竞赛列表后重试');
+      return reply({eventId:newId,state:next});
+    }
     if(body.action==='create-referee'){
       if(!admin)return reply({error:'仅管理员可以创建裁判账号'},403);
       const email=String(body.email??'').trim().toLowerCase(),displayName=String(body.displayName??'').trim();

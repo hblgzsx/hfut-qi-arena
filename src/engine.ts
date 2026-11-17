@@ -1,16 +1,20 @@
+import {defaultRules,validateRules} from './tournament-rules.ts';
+import type {TournamentRules} from './tournament-rules.ts';
+import { validateEvent } from './event-settings.ts';
+import type { EventSettings } from './event-settings.ts';
 export type Sport = 'gomoku' | 'junqi';
 export type Outcome = 'A' | 'B' | 'D';
 export interface Player { id: string; name: string; studentId: string; college: string; phone: string; qq: string; gender: string }
 export interface Result { kind: 'played' | 'forfeit' | 'double' | 'adjudicated'; games: Outcome[]; winner?: 'A' | 'B'; reason: string; referee: string; first: 'A' | 'B'; updatedAt: string }
-export interface Tournament { sport: Sport; players: Player[]; seeds: (string | null)[]; drawSeed: string; drawnAt: string; results: Record<string, Result>; mode: 'flip' | 'layout'; demo: boolean }
+export interface Tournament { rules?:TournamentRules; sport: Sport; players: Player[]; seeds: (string | null)[]; drawSeed: string; drawnAt: string; results: Record<string, Result>; mode: 'flip' | 'layout'; demo: boolean }
 export interface Prize { rank: string; name: string; description: string; image: string }
 export interface Audit { id: string; time: string; sport: Sport; message: string }
-export interface State { version: 1; revision: string; tournaments: Record<Sport, Tournament>; prizes: Record<Sport, Prize[]>; audit: Audit[] }
+export interface State { version: 1; revision: string; event?:EventSettings; tournaments: Record<Sport, Tournament>; prizes: Record<Sport, Prize[]>; audit: Audit[] }
 export interface Slot { id: string | null; settled: boolean; source: string }
 export interface Match { id: string; round: number; index: number; label: string; bestOf: 1 | 3; a: Slot; b: Slot; score: [number, number]; result?: Result; resolved: boolean; winner: string | null; bye: boolean; ready: boolean }
 
 export const SPORT_NAMES: Record<Sport, string> = { gomoku: '五子棋', junqi: '军棋' };
-export function emptyTournament(sport: Sport): Tournament { return { sport, players: [], seeds: [], drawSeed: '', drawnAt: '', results: {}, mode: 'flip', demo: false }; }
+export function emptyTournament(sport: Sport): Tournament { return { sport, rules:defaultRules(), players: [], seeds: [], drawSeed: '', drawnAt: '', results: {}, mode: 'flip', demo: false }; }
 export function emptyState(): State { return { version: 1, revision: crypto.randomUUID(), tournaments: { gomoku: emptyTournament('gomoku'), junqi: emptyTournament('junqi') }, prizes: { gomoku: defaultPrizes(), junqi: defaultPrizes() }, audit: [] }; }
 export function defaultPrizes(): Prize[] { return [ { rank: '冠军', name: '冠军奖品', description: '1 名 · 精美奖品与荣誉奖状', image: '' }, { rank: '亚军', name: '亚军奖品', description: '1 名 · 精美奖品与荣誉奖状', image: '' }, { rank: '季军', name: '季军奖品', description: '并列 2 名 · 精美奖品与荣誉奖状', image: '' } ]; }
 export function bracketSize(n: number): number { return n < 2 ? 0 : 2 ** Math.ceil(Math.log2(n)); }
@@ -21,7 +25,12 @@ export function roundLabel(round: number, total: number): string {
   if (remaining === 3) return '1/4 决赛';
   return `初赛第${round + 1}轮`;
 }
-export function bestOf(round: number, total: number): 1 | 3 { return total - round <= 2 || round >= 2 ? 3 : 1; }
+export function bestOf(round: number, total: number): 1 | 3 { return total - round <= 3 ? 3 : 1; }
+export function tournamentRules(t:Tournament):TournamentRules{return t.rules??defaultRules();}
+export function matchBestOf(t:Tournament,round:number,total:number,id:string):1|3{
+ if(!t.rules)return total-round<=2||round>=2?3:1; // Preserve already drawn legacy competitions.
+ const r=t.rules;return r.overrides[id]??(id==='BRONZE'?r.bronze:total-round===1?r.final:total-round===2?r.semifinal:total-round===3?r.quarterfinal:r.preliminary);
+}
 export function scoreGames(games: Outcome[]): [number, number] { return [games.filter(g => g === 'A').length, games.filter(g => g === 'B').length]; }
 
 // Replayable, uniform draw: Fisher-Yates, followed by evenly dispersed byes.
@@ -65,7 +74,7 @@ export function buildBracket(t: Tournament): Match[][] {
       const bye = a.settled && b.settled && (!a.id || !b.id);
       const result = ready ? t.results[id] : undefined;
       const score = scoreGames(result?.games ?? []);
-      const bo = bestOf(r, total), target = bo === 1 ? 1 : 2;
+      const bo = matchBestOf(t,r,total,id), target = bo === 1 ? 1 : 2;
       let resolved = bye, winner: string | null = bye ? a.id || b.id : null;
       if (result?.kind === 'double') { resolved = true; winner = null; }
       if (result?.kind === 'forfeit' || result?.kind === 'adjudicated') { resolved = true; winner = result.winner === 'A' ? a.id : b.id; }
@@ -74,14 +83,22 @@ export function buildBracket(t: Tournament): Match[][] {
     }
     rounds.push(matches);
   }
+  if(t.rules?.bronzeCount===1&&total>=2){
+    const semis=rounds[total-2];
+    const slot=(m:Match):Slot=>({id:m.resolved&&m.winner&&['played','adjudicated'].includes(m.result?.kind??'')?([m.a.id,m.b.id].find(id=>id!==m.winner)??null):null,settled:m.resolved,source:m.id});
+    const a=slot(semis[0]),b=slot(semis[1]),ready=a.settled&&b.settled&&!!a.id&&!!b.id,bye=a.settled&&b.settled&&(!a.id||!b.id),result=ready?t.results.BRONZE:undefined,score=scoreGames(result?.games??[]),bo=matchBestOf(t,total-1,total,'BRONZE');
+    let resolved=bye,winner:string|null=null;
+    if(result?.kind==='double')resolved=true;
+    if(result?.kind==='forfeit'||result?.kind==='adjudicated'){resolved=true;winner=result.winner==='A'?a.id:b.id;}
+    if(result?.kind==='played'&&Math.max(...score)>=(bo===1?1:2)){resolved=true;winner=score[0]>=(bo===1?1:2)?a.id:b.id;}
+    // A single eligible semifinal loser does not receive an invented playoff win.
+    rounds[total-1].push({id:'BRONZE',round:total-1,index:1,label:'季军争夺赛',bestOf:bo,a,b,ready,bye,result,score,resolved,winner});
+  }
   return rounds;
 }
 export function descendants(t: Tournament, id: string): string[] {
-  const m = buildBracket(t).flat().find(m => m.id === id);
-  if (!m) return [];
-  const list: string[] = [];
-  let index = m.index;
-  for (let r = m.round + 1; r < Math.log2(t.seeds.length); r++) { index = Math.floor(index / 2); list.push(`R${r + 1}-M${index + 1}`); }
+  const matches=buildBracket(t).flat(),affected=new Set<string>([id]),list:string[]=[];
+  for(const m of matches)if(m.id!==id&&(affected.has(m.a.source)||affected.has(m.b.source))){affected.add(m.id);list.push(m.id);}
   return list;
 }
 export function validateResult(m: Match, result: Result) {
@@ -119,15 +136,16 @@ export function standings(t: Tournament): { champion: string | null; runnerUp: s
   const runnerUp = final?.resolved && champion && ['played','adjudicated'].includes(final.result?.kind??'') ? [final.a.id, final.b.id].find(id => id !== champion) ?? null : null;
   // A disqualified / absent player does not receive a podium place automatically.
   const bronze = rounds.at(-2)?.filter(m => m.resolved && m.winner && ['played','adjudicated'].includes(m.result?.kind??'')).map(m => [m.a.id, m.b.id].find(id => id !== m.winner)!).filter((id): id is string => !!id) ?? [];
-  return { champion, runnerUp, bronze };
+  const count=t.rules?.bronzeCount??2,playoff=rounds.at(-1)?.find(m=>m.id==='BRONZE');
+  return { champion, runnerUp, bronze:count===0?[]:count===1?(playoff?.resolved&&playoff.winner?[playoff.winner]:[]):bronze };
 }
 export function validatePlayers(players: Player[]) {
   const ids = new Set<string>(), studentIds = new Set<string>();
   if (players.length > 256) throw new Error('每个项目最多支持 256 名选手。');
   for (const p of players) {
-    if (!p || ['id', 'name', 'studentId', 'college', 'phone', 'qq', 'gender'].some(k => typeof (p as unknown as Record<string, unknown>)[k] !== 'string')) throw new Error('选手资料格式不正确。');
+    if (!p || ['id', 'name', 'studentId', 'college', 'gender'].some(k => typeof (p as unknown as Record<string, unknown>)[k] !== 'string')) throw new Error('选手资料格式不正确。');
     if (!p.id || !p.name.trim() || !p.studentId.trim()) throw new Error('姓名和学号不能为空。');
-    if (p.name.length > 40 || p.studentId.length > 40 || p.college.length > 100 || p.phone.length > 40 || p.qq.length > 40 || p.gender.length > 20) throw new Error('选手资料字段过长。');
+    if (p.name.length > 40 || p.studentId.length > 40 || p.college.length > 100 || p.gender.length > 20) throw new Error('选手资料字段过长。');
     if (ids.has(p.id) || studentIds.has(p.studentId)) throw new Error(`学号 ${p.studentId} 重复，请先核对报名表。`);
     ids.add(p.id); studentIds.add(p.studentId);
   }
@@ -135,10 +153,13 @@ export function validatePlayers(players: Player[]) {
 export function validateState(input: unknown): State {
   if (!input || typeof input !== 'object') throw new Error('无效的备份文件。');
   const s = input as State;
+  if(s.event!==undefined)validateEvent(s.event);
   if (s.version !== 1 || typeof s.revision !== 'string' || !s.tournaments || !s.prizes || !Array.isArray(s.audit)) throw new Error('备份版本或结构不受支持。');
   for (const sport of ['gomoku', 'junqi'] as Sport[]) {
     const t = s.tournaments[sport];
     if (!t || t.sport !== sport || !Array.isArray(t.players) || !Array.isArray(t.seeds) || !t.results || typeof t.results !== 'object' || Array.isArray(t.results) || !['flip', 'layout'].includes(t.mode) || typeof t.demo !== 'boolean' || typeof t.drawSeed !== 'string' || typeof t.drawnAt !== 'string') throw new Error('赛事资料不完整。');
+    if(t.rules)validateRules(t.rules);
+    t.players=t.players.map(p=>{const {phone,qq,...safe}=p;void phone;void qq;return safe as Player;});
     validatePlayers(t.players);
     if (t.seeds.length) {
       if (t.seeds.length !== bracketSize(t.players.length)) throw new Error('签位数量与选手人数不匹配。');
@@ -166,8 +187,22 @@ export function demoState(): State {
     const players = names.slice(0, count).map((name, i) => ({ id: `${sport}-${i}`, name, studentId: `2026${sport === 'gomoku' ? '01' : '02'}${String(i + 1).padStart(4, '0')}`, college: colleges[i % 5], gender: i % 2 ? '女' : '男', phone: '', qq: '' }));
     let t = draw({ ...emptyTournament(sport), players, demo: true }, `HFUT-DEMO-${sport}`);
     const matches = buildBracket(t)[0].filter(m => m.ready).slice(0, sport === 'gomoku' ? 3 : 1);
-    for (const m of matches) t = setResult(t, m.id, { kind: 'played', games: ['A'], reason: '', referee: '演示裁判', first: 'A', updatedAt: new Date().toISOString() });
+    for (const m of matches) t = setResult(t, m.id, { kind: 'played', games: m.bestOf===1?['A']:['A','A'], reason: '', referee: '演示裁判', first: 'A', updatedAt: new Date().toISOString() });
     s.tournaments[sport] = t;
   }
   return s;
+}
+
+export function configureRules(t:Tournament,rules:TournamentRules):Tournament{
+ validateRules(rules);
+ const next={...t,rules:structuredClone(rules)};
+ // Never reinterpret a score after any game has been recorded.
+ for(const [id,result] of Object.entries(t.results)){
+  const before=buildBracket(t).flat().find(m=>m.id===id),after=buildBracket(next).flat().find(m=>m.id===id);
+  if(!after||before?.bestOf!==after.bestOf)throw new Error('已有成绩的场次不可更改赛制；请先由管理员撤销相关成绩。');
+  if(after.a.id!==before?.a.id||after.b.id!==before?.b.id)throw new Error('规则变更影响已有对局，请先撤销相关成绩。');
+  validateResult(after,result);
+ }
+ if((t.rules?.bronzeCount??2)!==rules.bronzeCount&&Object.keys(t.results).length)throw new Error('已有比赛成绩，不能更改季军人数；请在开赛前确定奖项。');
+ return next;
 }

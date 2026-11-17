@@ -28,7 +28,7 @@ export async function readRegistration(file: File): Promise<ImportPreview> {
       const name = get('name'), studentId = get('studentId');
       if (!name || !studentId) { preview.issues.push(`${label}第 ${r + 1} 行：姓名或学号为空。`); continue; }
       if (/e\+|\d\.\d/i.test(studentId)) { preview.issues.push(`${label}第 ${r + 1} 行：学号显示为科学计数法或小数，请在 Excel 中改为完整文本。`); continue; }
-      preview.players[sport].push({ id: crypto.randomUUID(), name, studentId, college: get('college') || '未填写', phone: get('phone'), qq: get('qq'), gender: get('gender') });
+      preview.players[sport].push({ id: crypto.randomUUID(), name, studentId, college: get('college') || '未填写', gender: get('gender') } as Player); // Contact columns are intentionally ignored.
     }
     try { validatePlayers(preview.players[sport]); } catch (error) { preview.issues.push(`${label}：${(error as Error).message}`); }
     if (preview.players[sport].length < 2) preview.warnings.push(`${label}不足 2 人，可以保存名单，但不能抽签开赛。`);

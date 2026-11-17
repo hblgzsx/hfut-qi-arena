@@ -24,11 +24,11 @@ test('2—256 人的随机赛程均覆盖全名单，无空对局，最终恰有
     const s=emptyState();s.tournaments.junqi=t;assert.doesNotThrow(()=>validateState(s));
   }
 });
-test('7 人为 8 签位与三轮：BO1、BO3、BO3；64 人为六轮',()=>{
+test('7 人为 8 签位与三轮：BO3、BO3、BO3；64 人为六轮',()=>{
   const t=create(7),rounds=buildBracket(t);
   assert.equal(rounds.length,3);assert.equal(rounds[0].filter(m=>m.bye).length,1);
-  assert.deepEqual(rounds.map(r=>r[0].bestOf),[1,3,3]);
-  assert.deepEqual(Array.from({length:6},(_,r)=>bestOf(r,6)),[1,1,3,3,3,3]);
+  assert.deepEqual(rounds.map(r=>r[0].bestOf),[3,3,3]);
+  assert.deepEqual(Array.from({length:6},(_,r)=>bestOf(r,6)),[1,1,1,3,3,3]);
 });
 test('随机种子可复现，不同种子改变签位，拒绝不足 2 人、重复学号和超过 256 人',()=>{
   assert.deepEqual(create(47,'abc').seeds,create(47,'abc').seeds);
@@ -48,7 +48,7 @@ test('上游未定禁止录入；修改旧结果清空对应路径但保留无�
   let t=create(8);assert.throws(()=>win(t,'R2-M1'));
   for(const r of buildBracket(t))for(const m of r){if(buildBracket(t).flat().find(x=>x.id===m.id)?.ready)t=win(t,m.id);}
   assert.ok(standings(t).champion);assert.deepEqual(descendants(t,'R1-M1'),['R2-M1','R3-M1']);
-  t=setResult(t,'R1-M1',result(['B']));assert.ok(t.results['R2-M2']);assert.ok(t.results['R1-M2']);assert.equal(t.results['R2-M1'],undefined);assert.equal(t.results['R3-M1'],undefined);assert.equal(standings(t).champion,null);
+  t=setResult(t,'R1-M1',result(['B','B']));assert.ok(t.results['R2-M2']);assert.ok(t.results['R1-M2']);assert.equal(t.results['R2-M1'],undefined);assert.equal(t.results['R3-M1'],undefined);assert.equal(standings(t).champion,null);
 });
 test('双弃权空位向下传播，另一分支胜者自动晋级，不伪造比赛与奖项',()=>{
   let t=create(4);t=setResult(t,'R1-M1',{...result([]),kind:'double',reason:'双方迟到'});t=win(t,'R1-M2');

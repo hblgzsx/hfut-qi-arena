@@ -4,7 +4,9 @@ import { validateState } from './engine';
 import type { Result, Sport, State } from './engine';
 const env=import.meta.env;
 const url=env.VITE_SUPABASE_URL??'',key=env.VITE_SUPABASE_PUBLISHABLE_KEY??'';
-export const eventId=env.VITE_EVENT_ID||'hfut-2026';
+const requestedEvent=new URLSearchParams(location.search).get('event');
+export const eventId=requestedEvent&&/^[a-z0-9-]{1,64}$/.test(requestedEvent)?requestedEvent:env.VITE_EVENT_ID||'hfut-2026';
+export function eventUrl(id:string){const url=new URL(location.href);url.searchParams.set('event',id);url.searchParams.delete('screen');url.searchParams.delete('view');return url.href;}
 export const cloudEnabled=!!url&&!!key;
 export const supabase=cloudEnabled?createClient(url,key):null;
 export interface Profile { id:string; display_name:string; email:string; role:'pending'|'referee'|'admin'|'superadmin'|'blocked' }

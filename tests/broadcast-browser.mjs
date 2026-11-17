@@ -4,7 +4,7 @@ import { demoState,buildBracket,setResult } from '../src/engine.ts';
 let state=demoState();
 const original=structuredClone(state),t=state.tournaments.gomoku,m=buildBracket(t).flat().find(m=>m.ready&&!m.resolved);
 const next=structuredClone(state);
-next.tournaments.gomoku=setResult(t,m.id,{kind:'played',games:['A'],first:'A',reason:'',referee:'测试裁判',updatedAt:new Date().toISOString()});
+next.tournaments.gomoku=setResult(t,m.id,{kind:'played',games:m.bestOf===1?['A']:['A','A'],first:'A',reason:'',referee:'测试裁判',updatedAt:new Date().toISOString()});
 next.revision=crypto.randomUUID();
 const browser=await chromium.launch({channel:'msedge',headless:true});
 const context=await browser.newContext({viewport:{width:1366,height:768}});const page=await context.newPage();

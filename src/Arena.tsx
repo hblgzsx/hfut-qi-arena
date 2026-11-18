@@ -60,7 +60,7 @@ function FitBracket({t,onRecord}:{t:Tournament;onRecord:(sport:Sport,id:string)=
 
 export function Arena({state,onExit,onRecord,onAwards,initialSport='gomoku',canRecord=true,connection='本地同步',queueEnabled=true,onToggleQueue,onBackdrop,queueSince=Date.now()}:{state:State;onExit:()=>void;onRecord:(s:Sport,id?:string)=>void;onAwards:()=>void;initialSport?:Sport;canRecord?:boolean;connection?:string;queueEnabled?:boolean;onToggleQueue?:()=>void;onBackdrop?:()=>void;queueSince?:number}) {
   const [mode,setMode]=useState<Sport|'both'>(new URLSearchParams(location.search).get('view')==='both'?'both':initialSport),[fullscreen,setFullscreen]=useState(!!document.fullscreenElement);
-  const [now,setNow]=useState(new Date());const [boardView,setBoardView]=useState<'standings'|'bracket'>('standings');
+  const [now,setNow]=useState(new Date());const [boardView,setBoardView]=useState<'standings'|'bracket'>(()=>new URLSearchParams(location.search).has('screen')?'bracket':'standings');
   const allMatches=(['gomoku','junqi'] as Sport[]).flatMap(s=>buildBracket(state.tournaments[s]).flat());const finished=allMatches.filter(m=>m.resolved&&!m.bye).length,totalPlayers=state.tournaments.gomoku.players.length+state.tournaments.junqi.players.length;
   useEffect(()=>{const t=setInterval(()=>setNow(new Date()),1000);const f=()=>setFullscreen(!!document.fullscreenElement);document.addEventListener('fullscreenchange',f);return()=>{clearInterval(t);document.removeEventListener('fullscreenchange',f);};},[]);
   const toggleFull=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{/* Browser can decline fullscreen; exit display remains available. */}};

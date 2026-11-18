@@ -1,13 +1,16 @@
+import { useId } from 'react';
 import type { Sport } from './engine';
 export function Board({ sport, large = false }: { sport: Sport; large?: boolean }) {
+  const id = useId();
+  const paint = (name: string) => `url(#${id}-${name})`;
   const stones = [[7,7,0],[8,7,1],[6,8,0],[8,8,1],[5,9,0],[8,9,1],[4,10,0],[8,6,1],[3,11,0]];
   if (sport === 'gomoku') return <svg className={`chessboard ${large ? 'large' : ''}`} viewBox="0 0 360 360" role="img" aria-label="15×15 五子棋盘，棋子依次落盘">
-    <defs><linearGradient id="wood" x2="1" y2="1"><stop stopColor="#efd9b5"/><stop offset="1" stopColor="#cfaa76"/></linearGradient><radialGradient id="black"><stop stopColor="#62615b"/><stop offset=".75" stopColor="#282d2a"/><stop offset="1" stopColor="#16221e"/></radialGradient><radialGradient id="white" cx=".35" cy=".3"><stop stopColor="#fff"/><stop offset="1" stopColor="#deddd3"/></radialGradient><filter id="shadow"><feDropShadow dx="1" dy="3" stdDeviation="2" floodOpacity=".23"/></filter></defs>
-    <rect x="5" y="5" width="350" height="350" rx="12" fill="url(#wood)"/>
-    {Array.from({length:15},(_,i)=><g key={i} stroke="#6f674f" strokeWidth=".7" opacity=".65"><path d={`M${26+i*22} 26V334`}/><path d={`M26 ${26+i*22}H334`}/></g>)}
-    {[[3,3],[3,11],[7,7],[11,3],[11,11]].map(([x,y])=><circle key={`${x}-${y}`} cx={26+x*22} cy={26+y*22} r="2.7" fill="#5c5948"/>)}
-    {stones.map(([x,y,c],i)=><circle className="stone" key={i} cx={26+x*22} cy={26+y*22} r="10" fill={`url(#${c?'white':'black'})`} filter="url(#shadow)" style={{animationDelay:`${i*.35}s`}}/>)}
-    <circle className="last-move" cx="92" cy="268" r="3" fill="#f27b50"/>
+    <defs><linearGradient id={`${id}-wood`} x2="100%" y2="100%"><stop stopColor="var(--board-light, #efd9b5)"/><stop offset="1" stopColor="var(--board-dark, #cfaa76)"/></linearGradient><radialGradient id={`${id}-black`} cx=".33" cy=".24" r=".76"><stop stopColor="#777971"/><stop offset=".55" stopColor="#343831"/><stop offset="1" stopColor="#101210"/></radialGradient><radialGradient id={`${id}-white`} cx=".35" cy=".3" r=".72"><stop stopColor="#fff"/><stop offset="1" stopColor="#c4c3b7"/></radialGradient><filter id={`${id}-shadow`}><feDropShadow dx="1" dy="4" stdDeviation="2" floodOpacity=".44"/></filter></defs>
+    <rect x="5" y="5" width="350" height="350" rx="12" fill={paint('wood')} stroke="var(--board-edge, transparent)" strokeWidth="2"/>
+    {Array.from({length:15},(_,i)=><g key={i} stroke="var(--board-grid, #6f674f)" strokeWidth=".8" opacity=".75"><path d={`M${26+i*22} 26V334`}/><path d={`M26 ${26+i*22}H334`}/></g>)}
+    {[[3,3],[3,11],[7,7],[11,3],[11,11]].map(([x,y])=><circle key={`${x}-${y}`} cx={26+x*22} cy={26+y*22} r="2.7" fill="var(--board-grid, #5c5948)"/>)}
+    {stones.map(([x,y,c],i)=><circle className="stone" key={i} cx={26+x*22} cy={26+y*22} r="10.2" fill={paint(c?'white':'black')} filter={paint('shadow')} style={{animationDelay:`${i*.19}s`}}/>)}
+    <circle className="last-move" cx="92" cy="268" r="3" fill="var(--board-move, #f27b50)"/>
   </svg>;
   const camps = new Set(['1-1','3-1','2-2','1-3','3-3','1-8','3-8','2-9','1-10','3-10']);
   return <svg className={`chessboard military ${large?'large':''}`} viewBox="0 0 300 390" role="img" aria-label="军棋棋盘，5列12行，公路、铁路、行营与大本营">

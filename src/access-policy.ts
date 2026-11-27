@@ -1,5 +1,8 @@
 export type AccountRole='pending'|'referee'|'admin'|'superadmin'|'blocked';
 export function isAdministrator(role:AccountRole|undefined){return role==='admin'||role==='superadmin';}
+export function canDeleteReferee(actor:{id:string;role:AccountRole},target:{id:string;role:AccountRole;deleted_at?:string|null}):boolean{
+ return actor.role==='superadmin'&&actor.id!==target.id&&target.role==='referee'&&!target.deleted_at;
+}
 export function canGrantRole(actor:{id:string;role:AccountRole},target:{id:string;role:AccountRole},role:AccountRole):boolean {
   if(actor.id===target.id)return false;
   if(actor.role==='superadmin')return ['referee','admin','superadmin','blocked'].includes(role);

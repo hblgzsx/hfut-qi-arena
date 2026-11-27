@@ -2,7 +2,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { emptyState, validateState } from '../../../src/engine.ts';
 import { applyCloudScore, redactState } from '../../../src/cloud-policy.ts';
 import type { Sport } from '../../../src/engine.ts';
-import { canGrantRole, isAdministrator, randomRefereePassword } from '../../../src/access-policy.ts';
+import { canGrantRole, isAdministrator, randomRefereePassword,canDeleteReferee } from '../../../src/access-policy.ts';
 import type { AccountRole } from '../../../src/access-policy.ts';
 import { dispatchTables, assertSafeCorrection,validateTableBindings } from '../../../src/scheduling.ts';
 import { scheduleAction, mayScoreTable, scheduleProtected, assertNoLiveReplacement } from '../../../src/schedule-actions.ts';
@@ -39,9 +39,26 @@ Deno.serve(async req=>{
     const token=(req.headers.get('Authorization')||'').replace(/^Bearer\s+/i,'');
     const {data:{user},error:authError}=await db.auth.getUser(token);
     if(authError||!user)return reply({error:'请先登录'},401);
-    const {data:profile,error:profileError}=await db.from('profiles').select('id,email,display_name,role').eq('id',user.id).single();
+    const {data:profile,error:profileError}=await db.from('profiles').select('id,email,display_name,role').eq('id',user.id).is('deleted_at',null).single();
     if(profileError||!profile)return reply({error:'账号尚未建立裁判资料，请联系管理员'},403);
     const admin=isAdministrator(profile.role),referee=profile.role==='referee';
+    if(body.action==='members-page'){
+      if(!admin)return reply({error:'仅管理员可进入裁判管理中心'},403);
+      const {data,error}=await db.rpc('arena_member_directory',{p_actor:user.id,p_query:String(body.query??''),p_group:String(body.group??'referee'),p_page:body.page??1,p_size:body.pageSize??20});if(error)throw error;return reply(data);
+    }
+    if(['referee-delete-check','delete-referee','restore-referee'].includes(body.action)){
+      if(profile.role!=='superadmin')return reply({error:'仅超级管理员可以删除或恢复裁判'},403);
+      const {data:target,error:targetError}=await db.from('profiles').select('id,display_name,email,role,deleted_at').eq('id',body.userId).maybeSingle();if(targetError)throw targetError;
+      if(!target)return reply({error:'裁判账号不存在'},404);
+      if(body.action==='restore-referee'){
+        if(target.id===user.id||!target.deleted_at)return reply({error:'此账号不能恢复为裁判'},400);
+      }else if(!canDeleteReferee({id:user.id,role:profile.role},target))return reply({error:'只能删除其他未删除的裁判账号'},403);
+      if(body.action==='referee-delete-check'){
+        const {data,error}=await db.rpc('arena_referee_links',{p_user:target.id});if(error)throw error;return reply({target,bindings:data??[],canDelete:!data?.length});
+      }
+      const {data,error}=await db.rpc('arena_manage_referee',{p_actor:user.id,p_target:target.id,p_action:body.action==='delete-referee'?'delete':'restore',p_email:String(body.confirmEmail??'')});if(error)throw error;
+      if(!data.ok)return reply(data,409);return reply(data);
+    }
     if(body.action==='voice-claim'){
       if(!admin)return reply({error:'请在主屏登录管理员后启用叫号语音'},403);
       const {data,error}=await db.rpc('arena_call_claim',{p_event:eventId,p_owner:String(body.owner??''),p_ack:String(body.ack??'')});
@@ -110,7 +127,7 @@ Deno.serve(async req=>{
     }
     if(body.action==='reset-referee'){
       if(!admin)return reply({error:'仅管理员可以重置裁判密码'},403);
-      const {data:target}=await db.from('profiles').select('id,role,email,display_name').eq('id',body.userId).single();
+      const {data:target}=await db.from('profiles').select('id,role,email,display_name').eq('id',body.userId).is('deleted_at',null).single();
       if(!target||!['referee','blocked'].includes(target.role))return reply({error:'此入口仅可重置裁判账号密码'},403);
       const password=randomRefereePassword();const {error}=await db.auth.admin.updateUserById(target.id,{password});if(error)throw error;
       return reply({credential:{email:target.email,password,displayName:target.display_name},notice:'旧密码已失效，新密码仅此次返回。'});
@@ -123,10 +140,10 @@ Deno.serve(async req=>{
     }
     if(body.action==='members'){
       if(!admin)return reply({error:'仅管理员可以审核裁判'},403);
-      const {data,error}=await db.from('profiles').select('id,email,display_name,role').order('created_at');if(error)throw error;return reply({profiles:data});
+      const {data,error}=await db.from('profiles').select('id,email,display_name,role').is('deleted_at',null).order('created_at');if(error)throw error;return reply({profiles:data});
     }
     if(body.action==='approve'){
-      const {data:target}=await db.from('profiles').select('id,role').eq('id',body.userId).single();
+      const {data:target}=await db.from('profiles').select('id,role').eq('id',body.userId).is('deleted_at',null).single();
       if(!target||!canGrantRole({id:user.id,role:profile.role as AccountRole},target,body.role))return reply({error:'权限不足：仅超级管理员可授权管理员或超级管理员，不能修改自身权限。'},403);
       if(target.role==='referee'&&body.role!=='referee'){
         const {data:assigned,error}=await db.from('private_events').select('state').is('deleted_at',null);

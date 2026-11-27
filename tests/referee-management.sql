@@ -1,0 +1,41 @@
+begin;
+do $$
+declare root_id uuid=gen_random_uuid(); admin_id uuid=gen_random_uuid(); judge_id uuid=gen_random_uuid(); i integer; new_id uuid; result jsonb; sample jsonb;
+begin
+ insert into auth.users(id,email,raw_user_meta_data) values(root_id,'mgmt-test-root@example.test','{"display_name":"管理测试超管"}'),(admin_id,'mgmt-test-admin@example.test','{"display_name":"管理测试管理员"}'),(judge_id,'mgmt-test-judge@example.test','{"display_name":"目录验证裁判00"}');
+ update profiles set role='superadmin' where id=root_id;
+ update profiles set role='admin' where id=admin_id;
+ update profiles set role='referee' where id=judge_id;
+ begin perform arena_manage_referee(root_id,judge_id,'delete','wrong@example.test');raise exception 'WRONG_EMAIL_ACCEPTED';exception when others then if sqlerrm='WRONG_EMAIL_ACCEPTED' then raise;end if;end;
+ begin perform arena_member_directory(admin_id,'','deleted',1,20);raise exception 'ADMIN_TRASH_ACCEPTED';exception when others then if sqlerrm='ADMIN_TRASH_ACCEPTED' then raise;end if;end;
+ for i in 1..46 loop
+  new_id=gen_random_uuid();insert into auth.users(id,email,raw_user_meta_data) values(new_id,'mgmt-test-judge'||i||'@example.test',jsonb_build_object('display_name','目录验证裁判'||lpad(i::text,2,'0')));update profiles set role='referee' where id=new_id;
+ end loop;
+ result=arena_member_directory(root_id,'目录验证裁判','referee',1,20);
+ if (result->>'total')::integer<>47 or jsonb_array_length(result->'profiles')<>20 then raise exception 'Page 1 not paginated'; end if;
+ result=arena_member_directory(root_id,'目录验证裁判','referee',3,20);
+ if jsonb_array_length(result->'profiles')<>7 then raise exception 'Last page wrong'; end if;
+ begin perform arena_manage_referee(admin_id,judge_id,'delete','mgmt-test-judge@example.test');raise exception 'ADMIN_DELETE_ACCEPTED';exception when others then if sqlerrm='ADMIN_DELETE_ACCEPTED' then raise;end if;end;
+ sample=jsonb_build_object('revision',gen_random_uuid(),'event',jsonb_build_object('name','删除绑定验证比赛'),'schedule',jsonb_build_object('bindings',jsonb_build_object(judge_id::text,jsonb_build_array('gomoku:1'))));
+ insert into private_events(id,state) values('referee-deletion-validation',sample);
+ result=arena_manage_referee(root_id,judge_id,'delete','mgmt-test-judge@example.test');
+ if (result->>'ok')::boolean or jsonb_array_length(result->'bindings')<>1 then raise exception 'Bound referee deletable';end if;
+ update private_events set deleted_at=now() where id='referee-deletion-validation';
+ result=arena_manage_referee(root_id,judge_id,'delete','mgmt-test-judge@example.test');
+ if (result->>'ok')::boolean then raise exception 'Deleted event binding ignored';end if;
+ update private_events set state=jsonb_set(state,'{schedule,bindings}','{}') where id='referee-deletion-validation';
+ insert into arena_event_grants(event_id,user_id) values('referee-deletion-validation',judge_id);
+ result=arena_manage_referee(root_id,judge_id,'delete','mgmt-test-judge@example.test');
+ if not (result->>'ok')::boolean or not exists(select 1 from profiles where id=judge_id and deleted_at is not null and role='blocked') then raise exception 'Unbound referee deletion failed';end if;
+ if exists(select 1 from arena_event_grants where user_id=judge_id) then raise exception 'Event access not revoked';end if;
+ result=arena_member_directory(root_id,'目录验证裁判','referee',1,50);if (result->>'total')::integer<>46 then raise exception 'Deleted still visible';end if;
+ result=arena_member_directory(root_id,'目录验证裁判','deleted',1,20);if (result->>'total')::integer<>1 then raise exception 'Deleted not recoverable';end if;
+ begin update private_events set state=sample where id='referee-deletion-validation';raise exception 'DELETED_REBOUND';exception when others then if sqlerrm='DELETED_REBOUND' then raise;end if;end;
+ result=arena_manage_referee(root_id,judge_id,'restore','mgmt-test-judge@example.test');
+ if not (result->>'ok')::boolean then raise exception 'Restore failed';end if;
+ update private_events set state=sample where id='referee-deletion-validation';
+ if jsonb_array_length(arena_referee_links(judge_id))<>1 then raise exception 'Restore binding failed';end if;
+end;
+$$;
+rollback;
+select 'PASS - 47 referees paginated; admin delete denied; active and deleted event bindings block deletion; unbound deletion revokes access; deleted hidden and recoverable; deleted referee cannot be rebound; restore works; all fixtures rolled back' as validation;

@@ -104,7 +104,7 @@ Deno.serve(async req=>{
       if(error)throw error;if(!created.user)throw new Error('裁判账号创建失败');
       const {error:updateError}=await db.from('profiles').update({role:'referee'}).eq('id',created.user.id);
       if(updateError){await db.auth.admin.deleteUser(created.user.id);throw updateError;}
-      return reply({credential:{email,password,displayName},notice:'密码仅此次返回，请安全提供给对应裁判。'});
+      return reply({referee:{id:created.user.id,display_name:displayName,email,role:'referee'},credential:{email,password,displayName},notice:'密码仅此次返回，请安全提供给对应裁判。'});
     }
     if(body.action==='reset-referee'){
       if(!admin)return reply({error:'仅管理员可以重置裁判密码'},403);
@@ -138,17 +138,6 @@ Deno.serve(async req=>{
     if(state&&referee&&!eventIsActive(state.event??defaultEvent())){
       if(body.action==='read')return reply({state:emptyState(),profile,unavailable:true});
       return reply({error:'当前不在比赛举行时间内，裁判只能为进行中的竞赛录分。'},403);
-    }
-    if(!state&&admin){
-      const {data:existing,error:existingError}=await db.from('private_events').select('id,deleted_at').eq('id',eventId).maybeSingle();if(existingError)throw existingError;
-      if(existing?.deleted_at||eventId!=='hfut-2026'){
-        if(body.action==='read')return reply({state:emptyState(),profile,unavailable:true});
-        return reply({error:'此竞赛已删除或不存在，请切换竞赛或从已删除竞赛中恢复。'},404);
-      }
-      const init=emptyState();const {error}=await db.from('private_events').insert({id:eventId,state:init});
-      if(error&&error.code!=='23505')throw error;
-      state=await load();
-      if(state){const {error:publishError}=await db.rpc('arena_commit',{p_id:eventId,p_revision:state.revision,p_state:state,p_public:redactState(state,'public')});if(publishError)throw publishError;}
     }
     if (!state) {
       if (body.action==='read') return reply({state:emptyState(),profile,unavailable:true});

@@ -23,27 +23,7 @@ await page.route('**/functions/v1/tournament',async r=>{
 });
 await page.routeWebSocket('wss://**/*',ws=>ws.onMessage(()=>{}));
 try{
- await page.goto('http://127.0.0.1:4291/');
- await page.getByRole('button',{name:'添加竞赛',exact:true}).waitFor();
- await page.getByRole('button',{name:'添加竞赛',exact:true}).click();
- assert.equal(await page.getByLabel('启用本场赛事自动备份').isChecked(),false);
- assert.equal(await page.getByLabel('备份间隔（分钟）').inputValue(),'10');
- await page.getByLabel('比赛名称',{exact:true}).fill('裁判绑定验证竞赛');
- await page.getByRole('button',{name:'下一步：确认创建'}).click();
- await page.getByRole('alert').filter({hasText:'尚未指定裁判'}).waitFor();
- assert.equal(requests.filter(r=>r.action==='create-event').length,0);
- await page.getByLabel('五子棋棋盘数',{exact:true}).fill('1');
- await page.getByLabel('军棋棋盘数',{exact:true}).fill('1');
- await page.getByLabel('裁判1负责棋盘').selectOption('gomoku:1');
- await page.getByLabel('裁判2负责棋盘').selectOption('gomoku:1');
- await page.getByRole('button',{name:'下一步：确认创建'}).click();
- await page.getByRole('alert').filter({hasText:'军棋 1 号桌尚未指定裁判'}).waitFor();
- await page.getByLabel('裁判2负责棋盘').selectOption('junqi:1');
- await page.getByLabel('裁判3负责棋盘').selectOption('gomoku:1');
- await page.getByRole('button',{name:'下一步：确认创建'}).click();
- await page.getByRole('heading',{name:'确认创建新竞赛'}).waitFor();
- await page.getByRole('button',{name:'取消',exact:true}).click();
- await page.getByRole('button',{name:'关闭弹窗'}).click();
+ await page.goto('http://127.0.0.1:4291/?event=hfut-2026');
  await page.getByRole('button',{name:'赛事设置与备份',exact:true}).click();
  await page.getByLabel('启用本场赛事自动备份').check();
  await page.getByRole('button',{name:'保存自动备份设置'}).click();

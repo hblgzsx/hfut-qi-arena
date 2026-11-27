@@ -19,7 +19,7 @@ try{
   await page.route('**/rest/v1/public_events**',r=>r.fulfill({json:{state}}));
   await page.route('**/functions/v1/tournament',r=>{const b=r.request().postDataJSON();requests.push(b);return r.fulfill({json:b.action==='events'?{events:[{id:'hfut-2026',...state.event}],serverNow:Date.now()}:{state,profile}});});
   await page.routeWebSocket('wss://**/*',ws=>ws.onMessage(()=>{}));
-  await page.goto('http://127.0.0.1:4291/');
+  await page.goto('http://127.0.0.1:4291/?event=hfut-2026');
   if(role==='referee'){
    await page.getByText('裁判录分台',{exact:true}).waitFor();
    assert.equal(await page.locator('.referee-matches>button').count(),1);

@@ -10,6 +10,9 @@ type Credential={email:string;password:string;displayName:string};
 export function AccountPanel({profile,call,onChanged,onWorkState}:{profile:Profile|null;call:(a:string,p?:Record<string,unknown>)=>Promise<any>;onChanged:()=>void;onWorkState?:(busy:boolean,unsaved:boolean)=>void}) {
   const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[people,setPeople]=useState<Profile[]>([]);
   const [refEmail,setRefEmail]=useState(''),[refName,setRefName]=useState(''),[credential,setCredential]=useState<Credential|null>(null);
+  const [memberSearch,setMemberSearch]=useState(''),[memberPage,setMemberPage]=useState(0);
+  const filteredPeople=people.filter(p=>p.id!==profile?.id&&(p.display_name+' '+p.email).toLowerCase().includes(memberSearch.toLowerCase()));
+  useEffect(()=>setMemberPage(0),[memberSearch]);
   const [unsavedBatch,setUnsavedBatch]=useState(false);useEffect(()=>{onWorkState?.(busy,unsavedBatch);},[busy,unsavedBatch]);
   async function list(){try{const d=await call('members');setPeople(d.profiles);}catch(e){setMessage((e as Error).message);}}
   useEffect(()=>{if(isAdministrator(profile?.role))void list();else setPeople([]);setCredential(null);},[profile?.id,profile?.role]);
@@ -32,10 +35,12 @@ export function AccountPanel({profile,call,onChanged,onWorkState}:{profile:Profi
       </form>
       {credential&&<div className="credential-card" role="status"><h3>请将登录信息交给对应裁判</h3><p>{credential.displayName} · {credential.email}</p><label className="form-label">随机密码（关闭后不再显示）<input readOnly value={credential.password} autoComplete="off" onFocus={e=>e.target.select()}/></label><div className="modal-actions"><button className="button secondary" onClick={()=>void run(async()=>{await navigator.clipboard.writeText(`邮箱：${credential.email}\n密码：${credential.password}`);setMessage('登录信息已复制，请安全交给对应裁判。');})}>复制登录信息</button><button className="button secondary" onClick={()=>setCredential(null)}>已保存，关闭密码</button></div></div>}
       <div className="member-list"><h3>账号与权限</h3><p>{profile.role==='superadmin'?'可授权管理员、超级管理员或裁判。不能修改自己的权限。':'可管理裁判。高级权限由超级管理员处理。'}</p>
-        {people.filter(p=>p.id!==profile.id).map(p=><div className="member-row" key={p.id}><div><b>{p.display_name}</b><small>{p.email} · {labels[p.role]}</small></div><div className="member-controls">
+        <label className="form-label">查找账号<input aria-label="查找管理账号" placeholder="姓名或邮箱" value={memberSearch} onChange={e=>setMemberSearch(e.target.value)}/></label>
+        {filteredPeople.slice(memberPage*10,memberPage*10+10).map(p=><div className="member-row" key={p.id}><div><b>{p.display_name}</b><small>{p.email} · {labels[p.role]}</small></div><div className="member-controls">
           <select aria-label={`${p.display_name}的权限`} value={p.role} disabled={busy} onChange={e=>void changeRole(p,e.target.value as Profile['role'])}><option value={p.role}>{labels[p.role]}</option>{(['referee','admin','superadmin','blocked'] as const).filter(role=>role!==p.role&&canGrantRole(profile,p,role)).map(role=><option key={role} value={role}>{labels[role]}</option>)}</select>
           {['referee','blocked'].includes(p.role)&&<button className="button secondary small" disabled={busy} onClick={()=>{if(confirm(`重置 ${p.display_name}（${p.email}）的密码？旧密码立即失效。`))void run(async()=>{setCredential(null);const data=await call('reset-referee',{userId:p.id});setCredential(data.credential);});}}>重置随机密码</button>}
-        </div></div>)}{people.length<2&&<p>暂无其他账号。</p>}
+        </div></div>)}{!filteredPeople.length&&<p>没有匹配的账号。</p>}
+        {filteredPeople.length>10&&<div className="roll-pagination"><button type="button" className="button secondary small" disabled={!memberPage} onClick={()=>setMemberPage(n=>n-1)}>上一页</button><span>{memberPage+1} / {Math.ceil(filteredPeople.length/10)} 页 · {filteredPeople.length} 人</span><button type="button" className="button secondary small" disabled={(memberPage+1)*10>=filteredPeople.length} onClick={()=>setMemberPage(n=>n+1)}>下一页</button></div>}
       </div>
     </>}
     <div className="modal-actions"><button className="button secondary" disabled={busy} onClick={()=>{onChanged();if(isAdministrator(profile.role))void list();}}>刷新权限状态</button><button className="button secondary" disabled={busy} onClick={()=>void run(async()=>{await supabase!.auth.signOut();setCredential(null);onChanged();})}>退出登录</button></div>

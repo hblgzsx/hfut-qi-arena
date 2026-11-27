@@ -14,6 +14,7 @@ export function useCloud() {
   const [remote,setRemote]=useState<State|null>(null),[profile,setProfile]=useState<Profile|null>(null),[status,setStatus]=useState(cloudEnabled?'正在连接云端':'本地离线'),[loading,setLoading]=useState(cloudEnabled);
   const generation=useRef(0);const [signedInAt,setSignedInAt]=useState<string|null>(null),[unavailable,setUnavailable]=useState(false);
   const [locked,setLocked]=useState(false);
+  const [backupAt,setBackupAt]=useState('');
   const call=useCallback(async(action:string,payload:Record<string,unknown>={})=>{
     if(!supabase)throw new Error('尚未配置 Supabase。请按部署说明创建项目。');
     const eventGrant=sessionStorage.getItem('qi-event-grant:'+eventId)||'';
@@ -27,7 +28,7 @@ export function useCloud() {
     try{
       const {data:{session}}=await supabase.auth.getSession();
       let next:State,p:Profile|null=null,missing=false;const loginTime=session?.user.last_sign_in_at||session?.user.created_at||null;
-      if(session){const data=await call('read');next=validateState(data.state);p=data.profile;missing=!!data.unavailable;if(n===generation.current)setLocked(!!data.locked);}
+      if(session){const data=await call('read');next=validateState(data.state);p=data.profile;missing=!!data.unavailable;if(n===generation.current){setLocked(!!data.locked);setBackupAt(data.lastBackupAt??'');}}
       else {if(n===generation.current)setProfile(null);const {data,error}=await supabase.from('public_events').select('state').eq('id',eventId).maybeSingle();if(error)throw error;missing=!data;next=data?validateState(data.state):emptyState();}
       if(n===generation.current){setRemote(next);setProfile(p);setUnavailable(missing);setSignedInAt(loginTime);setStatus(missing?'此竞赛已删除或不存在，请添加、恢复或切换竞赛。':'云端已同步');setLoading(false);}
     }catch(e){if(n===generation.current){setStatus(`连接失败：${(e as Error).message}`);setLoading(false);}}
@@ -42,5 +43,5 @@ export function useCloud() {
   },[refresh]);
   async function replace(state:State,expectedRevision:string,message:string,sport:Sport,password='',reason=''){generation.current++;const data=await call('replace',{state,expectedRevision,message,sport,password,reason});generation.current++;const next=validateState(data.state);setRemote(next);return next;}
   async function score(sport:Sport,id:string,result:Result|null,expectedSignature:string){generation.current++;const data=await call('score',{sport,id,result,expectedSignature});generation.current++;const next=validateState(data.state);setRemote(next);return next;}
-  return {enabled:cloudEnabled,remote,profile,signedInAt,status,loading,unavailable,locked,refresh,call,replace,score};
+  return {enabled:cloudEnabled,remote,profile,signedInAt,status,loading,unavailable,locked,backupAt,refresh,call,replace,score};
 }

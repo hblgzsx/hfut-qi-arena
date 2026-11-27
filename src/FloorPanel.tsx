@@ -3,6 +3,7 @@ import { buildBracket, SPORT_NAMES } from './engine';
 import type { Sport, State } from './engine';
 import { emptySchedule, occupied, SPORTS, tableKey, tableName } from './scheduling';
 import {eventId} from './cloud';
+import {TableBindingFields} from './TableBindingFields';
 
 export function FloorBoard({state,onRecord,userId}:{state:State;onRecord?:(sport:Sport,id:string)=>void;userId?:string}) {
   const s=state.schedule??emptySchedule();
@@ -52,13 +53,7 @@ export function FloorPanel({state,call,onChanged}:{state:State;call:(action:stri
     }}>设置 / 修改赛事密码</button>
     <label>操作原因<input value={reason} onChange={e=>setReason(e.target.value)} maxLength={200}/></label>
     <fieldset><legend>棋盘数量与裁判负责桌号</legend>
-      {SPORTS.map(sp=><label key={sp}>{SPORT_NAMES[sp]}棋盘数<input type="number" min={1} max={30} value={counts[sp]} onChange={e=>setCounts({...counts,[sp]:Number(e.target.value)})}/></label>)}
-      {members.map(p=><fieldset key={p.id}><legend>{p.display_name}</legend><div className="table-bindings">
-        {SPORTS.flatMap(sp=>Array.from({length:Math.max(0,Math.min(30,counts[sp]))},(_,i)=>{
-          const key=tableKey(sp,i+1);
-          return <label key={key}><input type="checkbox" checked={bindings[p.id]?.includes(key)??false} onChange={e=>setBindings({...bindings,[p.id]:e.target.checked?[...(bindings[p.id]??[]),key]:(bindings[p.id]??[]).filter(k=>k!==key)})}/>{tableName(sp,i+1)}</label>;
-        }))}
-      </div></fieldset>)}
+      <TableBindingFields value={{...s,counts,bindings}} members={members} onChange={next=>{setCounts(next.counts);setBindings(next.bindings);}}/>
       <button className="button secondary" disabled={busy||s.running} onClick={()=>void run({type:'configure',counts,bindings})}>保存棋盘与裁判绑定</button>
     </fieldset>
     <div className="sport-tabs">{SPORTS.map(sp=><button key={sp} onClick={()=>setSport(sp)} className={sport===sp?'selected':''}>{SPORT_NAMES[sp]}</button>)}</div>

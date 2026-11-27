@@ -1,0 +1,72 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import {demoState,validateState} from '../src/engine.ts';
+import {defaultEvent} from '../src/event-settings.ts';
+const browser=await chromium.launch({channel:'msedge',headless:true});
+const page=await browser.newPage({viewport:{width:1366,height:1000}});
+let state=demoState();state.event=defaultEvent();
+const profile={id:'backup-fixture-admin',role:'superadmin',display_name:'备份演示管理员',email:'admin@example.test'};
+const requests=[],errors=[];
+page.on('pageerror',e=>errors.push(e.message));
+await page.addInitScript(()=>{
+ localStorage.setItem('sb-nwvxamfgfbqbmamqfjcr-auth-token',JSON.stringify({access_token:'fixture',refresh_token:'fixture',expires_at:Math.floor(Date.now()/1000)+3600,user:{id:'backup-fixture-admin'}}));
+});
+await page.route('**/auth/v1/**',r=>r.fulfill({json:{user:{id:profile.id}}}));
+await page.route('**/functions/v1/tournament',async r=>{
+ const b=r.request().postDataJSON();requests.push(b);
+ if(b.action==='events')return r.fulfill({json:{events:[{id:'hfut-2026',...state.event,revision:state.revision}]}});
+ if(b.action==='members')return r.fulfill({json:{profiles:[1,2,3].map(i=>({id:'judge-'+i,display_name:'裁判'+i,role:'referee'}))}});
+ if(b.action==='backups')return r.fulfill({json:{backups:[{id:'backup-demo',created_at:new Date().toISOString(),revision:state.revision}]}});
+ if(b.action==='backup-download')return r.fulfill({json:{state}});
+ if(b.action==='replace')state=validateState({...b.state,revision:crypto.randomUUID()});
+ return r.fulfill({json:{state,profile}});
+});
+await page.routeWebSocket('wss://**/*',ws=>ws.onMessage(()=>{}));
+try{
+ await page.goto('http://127.0.0.1:4291/');
+ await page.getByRole('button',{name:'添加竞赛',exact:true}).waitFor();
+ await page.getByRole('button',{name:'添加竞赛',exact:true}).click();
+ assert.equal(await page.getByLabel('启用本场赛事自动备份').isChecked(),false);
+ assert.equal(await page.getByLabel('备份间隔（分钟）').inputValue(),'10');
+ await page.getByLabel('比赛名称',{exact:true}).fill('裁判绑定验证竞赛');
+ await page.getByRole('button',{name:'下一步：确认创建'}).click();
+ await page.getByRole('alert').filter({hasText:'尚未指定裁判'}).waitFor();
+ assert.equal(requests.filter(r=>r.action==='create-event').length,0);
+ await page.getByLabel('五子棋棋盘数',{exact:true}).fill('1');
+ await page.getByLabel('军棋棋盘数',{exact:true}).fill('1');
+ await page.getByLabel('裁判1负责棋盘').selectOption('gomoku:1');
+ await page.getByLabel('裁判2负责棋盘').selectOption('gomoku:1');
+ await page.getByRole('button',{name:'下一步：确认创建'}).click();
+ await page.getByRole('alert').filter({hasText:'军棋 1 号桌尚未指定裁判'}).waitFor();
+ await page.getByLabel('裁判2负责棋盘').selectOption('junqi:1');
+ await page.getByLabel('裁判3负责棋盘').selectOption('gomoku:1');
+ await page.getByRole('button',{name:'下一步：确认创建'}).click();
+ await page.getByRole('heading',{name:'确认创建新竞赛'}).waitFor();
+ await page.getByRole('button',{name:'取消',exact:true}).click();
+ await page.getByRole('button',{name:'关闭弹窗'}).click();
+ await page.getByRole('button',{name:'赛事设置与备份',exact:true}).click();
+ await page.getByLabel('启用本场赛事自动备份').check();
+ await page.getByRole('button',{name:'保存自动备份设置'}).click();
+ await page.getByText('自动备份设置已保存',{exact:true}).waitFor();
+ assert.equal(state.event.autoBackup.enabled,true);
+ await page.getByRole('button',{name:'关闭弹窗'}).click();
+ await page.locator('.auto-backup-status').waitFor();
+ await page.waitForFunction(async()=>{
+  return await new Promise(resolve=>{
+   const req=indexedDB.open('qi-arena-auto-backups',1);
+   req.onsuccess=()=>{const db=req.result;const q=db.transaction('snapshots').objectStore('snapshots').getAll();q.onsuccess=()=>{resolve(q.result.length===1);db.close();};};
+  });
+ });
+ await page.getByRole('button',{name:'赛事设置与备份',exact:true}).click();
+ const download=page.waitForEvent('download');
+ await page.locator('.backup-list').first().getByRole('button').first().click();
+ assert.ok((await download).suggestedFilename().endsWith('.json'));
+ await page.getByLabel('备份间隔（分钟）').fill('5');
+ await page.getByLabel('启用本场赛事自动备份').uncheck();
+ await page.getByRole('button',{name:'保存自动备份设置'}).click();
+ await page.getByText('自动备份设置已保存',{exact:true}).waitFor();
+ assert.deepEqual(state.event.autoBackup,{enabled:false,intervalMinutes:5});
+ assert.equal(requests.filter(r=>r.action==='score').length,0);
+ assert.deepEqual(errors,[]);
+ console.log('PASS: required judge coverage, one-table selection, multiple judges per table; backup default off/10min, enable, local snapshot, download, interval change, disable, no score writes.');
+}finally{await browser.close();}

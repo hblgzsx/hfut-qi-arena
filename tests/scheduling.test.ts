@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {emptyState,emptyTournament,buildBracket,setResult,validateState} from '../src/engine.ts';
-import {prepareDraw,dispatchTables,occupied,tableKey,assertSafeCorrection} from '../src/scheduling.ts';
+import {prepareDraw,dispatchTables,occupied,tableKey,assertSafeCorrection,emptySchedule,validateTableBindings} from '../src/scheduling.ts';
 import {scheduleAction,mayScoreTable,assertNoLiveReplacement} from '../src/schedule-actions.ts';
 
 function roster(n=16) {
   const state=emptyState();
+  state.schedule=emptySchedule();
+  for(const sport of ['gomoku','junqi'] as const)for(let i=1;i<=state.schedule.counts[sport];i++)state.schedule.bindings['judge-'+sport+i]=[tableKey(sport,i)];
   for(const sport of ['gomoku','junqi'] as const) {
     state.tournaments[sport]={...emptyTournament(sport),players:Array.from({length:n},(_,i)=>({
       id:sport+i,name:'同学'+i,studentId:'00'+i,college:'学院',gender:'',phone:'',qq:''
@@ -13,6 +15,21 @@ function roster(n=16) {
   }
   return state;
 }
+
+test('每桌需裁判，同一裁判只能一桌，同桌可多裁判',()=>{
+  const s=emptySchedule();s.counts={gomoku:1,junqi:1};
+  assert.throws(()=>validateTableBindings(s),/尚未指定裁判/);
+  s.bindings={r1:['gomoku:1','junqi:1']};
+  assert.throws(()=>validateTableBindings(s),/一名裁判只能/);
+  s.bindings={r1:['gomoku:1'],r2:['junqi:1'],r3:['gomoku:1']};
+  assert.doesNotThrow(()=>validateTableBindings(s));
+  let state=prepareDraw(roster(8),'gomoku',[],[],'uncovered');
+  state.schedule!.bindings={};state.schedule!.running=true;
+  assert.equal(dispatchTables(state,1000).schedule!.assignments.length,0);
+  assert.throws(()=>scheduleAction(state,{type:'start'}),/尚未指定裁判/);
+  state.schedule!.running=false;
+  assert.throws(()=>scheduleAction(state,{type:'configure',counts:s.counts,bindings:{r1:['gomoku:1','junqi:1']}}),/一名裁判只能/);
+});
 test('未到场者移出抽签，优先只调整对局顺序，刷新保持签位与队列',()=>{
   const original=roster(9);
   const state=prepareDraw(original,'gomoku',['gomoku8'],['gomoku3'],'stable');

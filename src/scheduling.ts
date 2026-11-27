@@ -30,6 +30,20 @@ export interface Schedule {
 export const tableKey = (sport: Sport, table: number) => sport + ':' + table;
 export const tableName = (sport: Sport, table: number) => SPORT_NAMES[sport] + ' ' + table + ' 号桌';
 export const occupied = (a: TableAssignment) => a.status === 'called' || a.status === 'playing';
+export function validateTableBindings(s:Schedule,requireAll=true) {
+  if(SPORTS.some(sport=>!Number.isInteger(s.counts[sport])||s.counts[sport]<1||s.counts[sport]>30))throw new Error('每个项目的棋盘数量必须是 1—30 的整数。');
+  const covered=new Set<string>();
+  for(const keys of Object.values(s.bindings)){
+    if(!Array.isArray(keys)||keys.length>1)throw new Error('同一赛事内，一名裁判只能绑定一张棋盘。');
+    for(const key of keys){
+      if(!SPORTS.some(sport=>Array.from({length:s.counts[sport]},(_,i)=>tableKey(sport,i+1)).includes(key)))throw new Error('裁判绑定了不存在的棋盘。');
+      covered.add(key);
+    }
+  }
+  if(requireAll)for(const sport of SPORTS)for(let table=1;table<=s.counts[sport];table++){
+    if(!covered.has(tableKey(sport,table)))throw new Error(tableName(sport,table)+'尚未指定裁判。');
+  }
+}
 export function emptySchedule(): Schedule {
   return { counts: { gomoku: 10, junqi: 5 }, queues: { gomoku: [], junqi: [] },
     draws: { gomoku: '', junqi: '' }, bindings: {}, assignments: [], calls: [], running: false };
@@ -96,6 +110,7 @@ export function dispatchTables(input: State, now = Date.now()): State {
     if (s.draws[sport] !== t.drawnAt) continue;
     const matches = buildBracket(t).flat();
     for (let table = 1; table <= s.counts[sport]; table++) {
+      if(!Object.values(s.bindings).some(keys=>keys.length===1&&keys[0]===tableKey(sport,table)))continue;
       if (s.assignments.some(a => a.sport === sport && a.table === table && occupied(a))) continue;
       const match = s.queues[sport].map(id => matches.find(m => m.id === id)).find(m =>
         m?.ready && !m.resolved &&

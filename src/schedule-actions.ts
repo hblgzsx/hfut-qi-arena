@@ -1,6 +1,6 @@
 import { buildBracket } from './engine.ts';
 import type { Sport, State } from './engine.ts';
-import { dispatchTables, emptySchedule, occupied, prepareDraw, SPORTS, tableKey } from './scheduling.ts';
+import { dispatchTables, emptySchedule, occupied, prepareDraw, SPORTS, tableKey,validateTableBindings } from './scheduling.ts';
 
 export function scheduleAction(input: State, command: Record<string, any>, now=Date.now()): State {
   const next = structuredClone(input);
@@ -15,7 +15,9 @@ export function scheduleAction(input: State, command: Record<string, any>, now=D
     if (s.assignments.some(a=>occupied(a)&&a.table>command.counts?.[a.sport])) throw new Error('缩减数量将移除正在使用的棋盘，请先完成该桌比赛。');
     s.counts = command.counts;
     s.bindings = command.bindings;
+    validateTableBindings(s);
   } else if (command.type === 'start') {
+    validateTableBindings(s);
     for (const sp of SPORTS) {
       if (next.tournaments[sp].seeds.length && s.draws[sp] !== next.tournaments[sp].drawnAt) throw new Error('请先在现场调度中确认该项目抽签，旧签位不会自动接管。');
     }
@@ -43,7 +45,8 @@ export function scheduleAction(input: State, command: Record<string, any>, now=D
 }
 export function mayScoreTable(state: State, user: string, sport: Sport, match: string) {
   const a=state.schedule?.assignments.find(a=>a.sport===sport && a.match===match && occupied(a));
-  return !!a && !!state.schedule?.bindings[user]?.includes(tableKey(sport,a.table));
+  const keys=state.schedule?.bindings[user];
+  return !!a && keys?.length===1 && keys[0]===tableKey(sport,a.table);
 }
 export function scheduleProtected(before:State,after:State) {
   return JSON.stringify(before.schedule)!==JSON.stringify(after.schedule) ||

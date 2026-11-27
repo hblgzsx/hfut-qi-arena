@@ -4,7 +4,7 @@ import { applyCloudScore, redactState } from '../../../src/cloud-policy.ts';
 import type { Sport } from '../../../src/engine.ts';
 import { canGrantRole, isAdministrator, randomRefereePassword } from '../../../src/access-policy.ts';
 import type { AccountRole } from '../../../src/access-policy.ts';
-import { dispatchTables, assertSafeCorrection } from '../../../src/scheduling.ts';
+import { dispatchTables, assertSafeCorrection,validateTableBindings } from '../../../src/scheduling.ts';
 import { scheduleAction, mayScoreTable, scheduleProtected, assertNoLiveReplacement } from '../../../src/schedule-actions.ts';
 import {defaultEvent,eventIsActive} from '../../../src/event-settings.ts';
 
@@ -35,21 +35,6 @@ Deno.serve(async req=>{
       }
       return reply({ok:true});
     }
-    if(body.action==='floor-tick'){
-      // Only derive dispatch from committed state and server time; accept no client state.
-      const {data:row,error}=await db.from('private_events').select('state').eq('id',eventId).is('deleted_at',null).maybeSingle();
-      if(error)throw error;
-      if(!row)return reply({ok:true});
-      const current=validateState(row.state);
-      if(!eventIsActive(current.event??defaultEvent()))return reply({ok:true});
-      const next=dispatchTables(current);
-      if(next!==current){
-        next.revision=crypto.randomUUID();
-        const {error:commitError}=await db.rpc('arena_commit',{p_id:eventId,p_revision:current.revision,p_state:next,p_public:redactState(next,'public')});
-        if(commitError)throw commitError;
-      }
-      return reply({ok:true});
-    }
     const token=(req.headers.get('Authorization')||'').replace(/^Bearer\s+/i,'');
     const {data:{user},error:authError}=await db.auth.getUser(token);
     if(authError||!user)return reply({error:'请先登录'},401);
@@ -62,11 +47,19 @@ Deno.serve(async req=>{
       if(error)throw error;
       return reply(data);
     }
-    if(body.action==='voice-claim'){
-      if(!admin)return reply({error:'请在主屏登录管理员后启用叫号语音'},403);
-      const {data,error}=await db.rpc('arena_call_claim',{p_event:eventId,p_owner:String(body.owner??''),p_ack:String(body.ack??'')});
-      if(error)throw error;
-      return reply(data);
+    if(['backups','backup-download','backup-now'].includes(body.action)){
+      if(!admin)return reply({error:'仅管理员可管理赛事备份'},403);
+      if(body.action==='backups'){
+        const {data,error}=await db.from('arena_auto_backups').select('id,created_at,revision').eq('event_id',eventId).order('created_at',{ascending:false}).limit(72);
+        if(error)throw error;return reply({backups:data??[]});
+      }
+      if(body.action==='backup-download'){
+        const {data,error}=await db.from('arena_auto_backups').select('state').eq('event_id',eventId).eq('id',body.backupId).maybeSingle();
+        if(error)throw error;if(!data)return reply({error:'备份不存在或已轮换'},404);
+        return reply({state:validateState(data.state)});
+      }
+      const {data,error}=await db.rpc('arena_backup_event',{p_id:eventId,p_force:true});
+      if(error)throw error;return reply(data);
     }
     if(body.action==='events'){
       if(!admin&&!referee)return reply({error:'请使用已授权账号'},403);
@@ -79,6 +72,12 @@ Deno.serve(async req=>{
       if(!admin)return reply({error:'仅管理员可以创建竞赛'},403);
       const next=validateState(body.state);
       if(!next.event||Object.values(next.tournaments).some(t=>t.players.length||t.seeds.length||Object.keys(t.results).length))return reply({error:'请以完整基本信息创建空白竞赛'},400);
+      if(!next.schedule)throw new Error('创建竞赛时请配置棋盘与裁判');
+      validateTableBindings(next.schedule);
+      const {data:judges,error:judgeError}=await db.from('profiles').select('id').eq('role','referee');
+      if(judgeError)throw judgeError;
+      const judgeIds=new Set((judges??[]).map(p=>p.id));
+      if(Object.keys(next.schedule.bindings).some(id=>!judgeIds.has(id)))throw new Error('绑定的裁判账号不存在或已停用');
       const newId='event-'+crypto.randomUUID();next.revision=crypto.randomUUID();
       next.audit=[{id:crypto.randomUUID(),time:new Date().toISOString(),sport:'gomoku',message:'已创建独立竞赛：'+next.event.name+' · '+profile.display_name}];
       const {data,error}=await db.rpc('arena_create_event',{p_id:newId,p_state:next,p_public:redactState(next,'public'),p_actor:user.id});if(error)throw error;if(!data)throw new Error('竞赛发布失败，请刷新竞赛列表后重试');
@@ -127,6 +126,11 @@ Deno.serve(async req=>{
     if(body.action==='approve'){
       const {data:target}=await db.from('profiles').select('id,role').eq('id',body.userId).single();
       if(!target||!canGrantRole({id:user.id,role:profile.role as AccountRole},target,body.role))return reply({error:'权限不足：仅超级管理员可授权管理员或超级管理员，不能修改自身权限。'},403);
+      if(target.role==='referee'&&body.role!=='referee'){
+        const {data:assigned,error}=await db.from('private_events').select('state').is('deleted_at',null);
+        if(error)throw error;
+        if(assigned?.some(row=>row.state?.schedule?.bindings?.[target.id]?.length))return reply({error:'此裁判仍绑定在比赛棋盘上，请先为该桌更换裁判并解除原绑定。'},409);
+      }
       const {data,error}=await db.from('profiles').update({role:body.role}).eq('id',target.id).select('id');if(error)throw error;if(!data?.length)return reply({error:'账号不存在'},400);return reply({ok:true});
     }
     const load=async()=>{const {data,error}=await db.from('private_events').select('state').eq('id',eventId).is('deleted_at',null).maybeSingle();if(error)throw error;return data?.state?validateState(data.state):null;};
@@ -179,6 +183,7 @@ Deno.serve(async req=>{
     }
     if(!state)return reply({error:'竞赛已不存在，请刷新'},404);
     if (body.action==='schedule') {
+      if(!admin&&!referee)return reply({error:'当前账号没有现场调度权限'},403);
       if(!admin && body.command?.type!=='begin') return reply({error:'仅管理员可修改调度'},403);
       if(body.command?.type!=='begin') {
         await access('check',String(body.password??''));
@@ -204,7 +209,14 @@ Deno.serve(async req=>{
       if(!data) return reply({error:'调度提交冲突，请刷新后重试'},409);
       return reply({state:redactState(next,admin?'admin':'referee')});
     }
-    if(body.action==='read')return reply({state:state?redactState(state,admin?'admin':referee?'referee':'public'):emptyState(),profile,unavailable:!state});
+    if(body.action==='read'){
+      let lastBackupAt=null;
+      if(admin){
+        const {data}=await db.from('arena_auto_backups').select('created_at').eq('event_id',eventId).order('created_at',{ascending:false}).limit(1);
+        lastBackupAt=data?.[0]?.created_at??null;
+      }
+      return reply({state:redactState(state,admin?'admin':referee?'referee':'public'),profile,lastBackupAt,unavailable:false});
+    }
     if(!state)return reply({error:'请先由管理员初始化赛事'},400);
     if(body.action==='replace'){
       if(!admin)return reply({error:'仅管理员可以修改名单、抽签、奖品与赛事设置'},403);
@@ -214,7 +226,18 @@ Deno.serve(async req=>{
         await access('check',String(body.password??''));
         if(String(body.reason??'').trim().length<2) throw new Error('修改抽签或顺序必须填写原因');
         // Schedule mutations use the dedicated validated command endpoint.
-        if(JSON.stringify(next.schedule)!==JSON.stringify(state.schedule)) throw new Error('请在现场调度中修改棋盘与顺序');
+        if(JSON.stringify(next.schedule)!==JSON.stringify(state.schedule)){
+          if(state.schedule?.assignments.some(a=>a.status==='called'||a.status==='playing')) throw new Error('恢复备份前请完成正在使用的棋盘对局。');
+          if(next.schedule){
+            validateTableBindings(next.schedule);
+            const {data:judges,error}=await db.from('profiles').select('id').eq('role','referee');
+            if(error)throw error;
+            const validIds=new Set((judges??[]).map(p=>p.id));
+            if(Object.entries(next.schedule.bindings).some(([id,keys])=>keys.length&&!validIds.has(id)))throw new Error('备份中的裁判账号已停用，请先核对裁判绑定。');
+            next.schedule.running=false;
+            for(const assignment of next.schedule.assignments)if(assignment.status==='called'||assignment.status==='playing')assignment.status='cancelled';
+          }
+        }
       }
       assertNoLiveReplacement(state,next);
       next.revision=crypto.randomUUID();

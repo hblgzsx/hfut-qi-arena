@@ -22,6 +22,7 @@ try{
   await page.goto('http://127.0.0.1:4291/?event=hfut-2026');
   if(role==='referee'){
    await page.getByText('裁判录分台',{exact:true}).waitFor();
+   await page.locator('.referee-matches>button').first().waitFor();
    assert.equal(await page.locator('.referee-matches>button').count(),1);
    await page.getByRole('button',{name:/账号/}).click();
    assert.equal(await page.getByRole('heading',{name:'创建裁判账号',exact:true}).count(),0);
@@ -34,6 +35,7 @@ try{
   }
   for(const label of adminLabels)assert.equal(await page.getByRole('button',{name:label,exact:true}).count(),0,role+': '+label);
   assert.equal(requests.some(r=>['members','backups','audit'].includes(r.action)),false);
+  assert.equal(await page.locator('.credential-export').count(),0);
   assert.deepEqual(errors,[]);await context.close();
  }
  console.log('PASS: public/pending/referee cannot see admin tools or registration, no privileged API requests; referee sees only own table.');

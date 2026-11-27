@@ -29,13 +29,16 @@ async function pdf(button,name){const wait=page.waitForEvent('download',{timeout
 try{
  await page.goto('http://127.0.0.1:4291/');await page.getByRole('heading',{name:'先选一场比赛，再进入现场。'}).waitFor();assert.equal(await page.getByRole('button',{name:'现场调度',exact:true}).count(),0);
  await page.getByRole('button',{name:'创建新竞赛',exact:true}).click();await page.getByLabel('比赛名称',{exact:true}).fill('编排创建验证赛事');
+ await page.getByRole('button',{name:'下一步',exact:true}).click();await page.getByRole('alert').filter({hasText:'赛事密码'}).waitFor();
+ await page.getByLabel('创建赛事密码',{exact:true}).fill('TEST-EVENT-ONLY');await page.getByLabel('确认创建赛事密码',{exact:true}).fill('WRONG-EVENT-ONLY');
+ await page.getByRole('button',{name:'下一步',exact:true}).click();await page.getByRole('alert').filter({hasText:'不一致'}).waitFor();await page.getByLabel('确认创建赛事密码',{exact:true}).fill('TEST-EVENT-ONLY');
  await page.getByRole('button',{name:'下一步',exact:true}).click();await page.getByRole('button',{name:'下一步',exact:true}).click();
  await page.getByRole('button',{name:'下一步',exact:true}).click();await page.getByRole('alert').filter({hasText:'尚未指定裁判'}).waitFor();
  await page.getByLabel('五子棋棋盘数',{exact:true}).fill('2');
  await selectJudge('五子棋 1 号桌','裁判甲');await selectJudge('五子棋 1 号桌','裁判乙');
  await page.getByRole('button',{name:'五子棋 2 号桌添加裁判',exact:true}).click();await page.getByLabel('搜索可用裁判').fill('裁判甲');assert.equal(await page.locator('.picker-results button').count(),0);
  await page.getByRole('button',{name:'新建裁判',exact:true}).click();await page.getByLabel('新裁判姓名').fill('新裁判丁');await page.getByLabel('新裁判邮箱').fill('new@example.test');await page.getByRole('button',{name:'创建并加入此桌'}).click();await page.getByText('新账号已创建，请先保存登录信息').waitFor();
- const credential=page.waitForEvent('download');await page.getByRole('button',{name:'下载此裁判登录信息'}).click();assert.ok((await credential).suggestedFilename().endsWith('.txt'));await page.getByRole('button',{name:'完成添加',exact:true}).click();
+ const credentialPanel=page.getByRole('region',{name:'导出此裁判登录信息'});await credentialPanel.getByLabel('导出字段 密码').check();const credential=page.waitForEvent('download');await credentialPanel.getByRole('button',{name:'导出所选裁判 TXT'}).click();assert.ok((await credential).suggestedFilename().endsWith('.txt'));await page.getByRole('button',{name:'完成添加',exact:true}).click();
  await page.locator('.composer-toolbar').getByRole('button',{name:/军棋/}).click();await page.getByLabel('军棋棋盘数',{exact:true}).fill('1');await selectJudge('军棋 1 号桌','裁判丙');
  await page.locator('.composer-toolbar').getByRole('button',{name:/五子棋/}).click();
  await page.screenshot({path:path.join(output,'棋盘裁判编排-桌面.png'),fullPage:true});
@@ -46,6 +49,7 @@ try{
  await pdf('下载裁判安排 PDF','裁判安排-未发布草稿.pdf');
  await page.getByRole('button',{name:'核对完成，创建竞赛'}).click();await page.getByRole('heading',{name:'确认创建新竞赛'}).waitFor();await page.getByRole('button',{name:'确认创建竞赛',exact:true}).click();await page.waitForURL('**?event=created-event');
  assert.equal(Object.values(createdPayload.schedule.bindings).filter(a=>a.length).length,4);assert.equal(createdPayload.schedule.bindings.j1[0],'gomoku:1');assert.equal(createdPayload.schedule.bindings.j4[0],'gomoku:2');
+ assert.equal(requests.find(r=>r.action==='create-event').password,'TEST-EVENT-ONLY');assert.equal(JSON.stringify(createdPayload).includes('TEST-EVENT-ONLY'),false);
  await page.goto('http://127.0.0.1:4291/?event=event-one');await page.getByRole('button',{name:'现场调度',exact:true}).click();await page.getByRole('heading',{name:'现场资料验证赛事',exact:true}).waitFor();
  await page.getByRole('button',{name:'资料与打印',exact:true}).click();await pdf('下载裁判安排 PDF','裁判与棋盘安排-演示.pdf');
  await page.getByRole('button',{name:'现场对阵与候场',exact:true}).click();await pdf('下载对阵候场 PDF','现场对阵与候场-演示.pdf');

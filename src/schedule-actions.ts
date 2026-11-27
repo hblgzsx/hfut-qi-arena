@@ -1,6 +1,12 @@
 import { buildBracket } from './engine.ts';
-import type { Sport, State } from './engine.ts';
+import type { Sport, State, Tournament } from './engine.ts';
 import { dispatchTables, emptySchedule, occupied, prepareDraw, SPORTS, tableKey,validateTableBindings } from './scheduling.ts';
+export function replaceRegistration(state:State,tournaments:Record<Sport,Tournament>):State{
+ if(state.schedule?.assignments.some(occupied))throw new Error('已有叫号或进行中的对局，请先处理现场对局，再替换报名名单。');
+ const next=structuredClone(state);next.tournaments=structuredClone(tournaments);
+ if(next.schedule)next.schedule={...emptySchedule(),counts:next.schedule.counts,bindings:next.schedule.bindings};
+ return next;
+}
 
 export function scheduleAction(input: State, command: Record<string, any>, now=Date.now()): State {
   const next = structuredClone(input);

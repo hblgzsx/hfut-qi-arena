@@ -7,6 +7,7 @@ import type { AccountRole } from '../../../src/access-policy.ts';
 import { dispatchTables, assertSafeCorrection,validateTableBindings } from '../../../src/scheduling.ts';
 import { scheduleAction, mayScoreTable, scheduleProtected, assertNoLiveReplacement } from '../../../src/schedule-actions.ts';
 import {defaultEvent,eventIsActive} from '../../../src/event-settings.ts';
+import {validateNewEventPassword} from '../../../src/event-password.ts';
 
 const db=createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,{auth:{persistSession:false}});
 const allowed=Deno.env.get('ALLOWED_ORIGIN')||'*';
@@ -70,6 +71,7 @@ Deno.serve(async req=>{
     }
     if(body.action==='create-event'){
       if(!admin)return reply({error:'仅管理员可以创建竞赛'},403);
+      const password=validateNewEventPassword(body.password);
       const next=validateState(body.state);
       if(!next.event||Object.values(next.tournaments).some(t=>t.players.length||t.seeds.length||Object.keys(t.results).length))return reply({error:'请以完整基本信息创建空白竞赛'},400);
       if(!next.schedule)throw new Error('创建竞赛时请配置棋盘与裁判');
@@ -77,10 +79,10 @@ Deno.serve(async req=>{
       const {data:judges,error:judgeError}=await db.from('profiles').select('id').eq('role','referee');
       if(judgeError)throw judgeError;
       const judgeIds=new Set((judges??[]).map(p=>p.id));
-      if(Object.keys(next.schedule.bindings).some(id=>!judgeIds.has(id)))throw new Error('绑定的裁判账号不存在或已停用');
+      if(Object.entries(next.schedule.bindings).some(([id,keys])=>keys.length&&!judgeIds.has(id)))throw new Error('绑定的裁判账号不存在或已停用');
       const newId='event-'+crypto.randomUUID();next.revision=crypto.randomUUID();
       next.audit=[{id:crypto.randomUUID(),time:new Date().toISOString(),sport:'gomoku',message:'已创建独立竞赛：'+next.event.name+' · '+profile.display_name}];
-      const {data,error}=await db.rpc('arena_create_event',{p_id:newId,p_state:next,p_public:redactState(next,'public'),p_actor:user.id});if(error)throw error;if(!data)throw new Error('竞赛发布失败，请刷新竞赛列表后重试');
+      const {data,error}=await db.rpc('arena_create_event_with_password',{p_id:newId,p_state:next,p_public:redactState(next,'public'),p_actor:user.id,p_password:password});if(error)throw error;if(!data)throw new Error('竞赛发布失败，请刷新竞赛列表后重试');
       return reply({eventId:newId,state:next});
     }
     if(body.action==='delete-event'||body.action==='restore-event'){
@@ -187,7 +189,7 @@ Deno.serve(async req=>{
         const {data:members,error}=await db.from('profiles').select('id').eq('role','referee');
         if(error) throw error;
         const allowed=new Set((members??[]).map(p=>p.id));
-        if(Object.keys(body.command.bindings??{}).some(id=>!allowed.has(id))) throw new Error('只能绑定现有裁判账号');
+        if(Object.entries(body.command.bindings??{}).some(([id,keys])=>Array.isArray(keys)&&keys.length&&!allowed.has(id))) throw new Error('只能绑定现有裁判账号');
       }
       const next=validateState(scheduleAction(state,body.command));
       next.revision=crypto.randomUUID();

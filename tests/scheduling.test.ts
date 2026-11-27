@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {emptyState,emptyTournament,buildBracket,setResult,validateState} from '../src/engine.ts';
 import {prepareDraw,dispatchTables,occupied,tableKey,assertSafeCorrection,emptySchedule,validateTableBindings} from '../src/scheduling.ts';
-import {scheduleAction,mayScoreTable,assertNoLiveReplacement} from '../src/schedule-actions.ts';
+import {scheduleAction,mayScoreTable,assertNoLiveReplacement,replaceRegistration} from '../src/schedule-actions.ts';
 
 function roster(n=16) {
   const state=emptyState();
@@ -15,6 +15,18 @@ function roster(n=16) {
   }
   return state;
 }
+
+test('重新导入名单清空旧调度，保留棋盘与裁判；现场占桌时禁止替换',()=>{
+ const original=prepareDraw(roster(8),'gomoku',[],[],'old-import');
+ const replacement=roster(6).tournaments;
+ const next=replaceRegistration(original,replacement);
+ assert.deepEqual(next.schedule!.bindings,original.schedule!.bindings);
+ assert.deepEqual(next.schedule!.counts,original.schedule!.counts);
+ assert.deepEqual(next.schedule!.queues,{gomoku:[],junqi:[]});assert.deepEqual(next.schedule!.assignments,[]);assert.equal(next.schedule!.running,false);
+ assert.doesNotThrow(()=>validateState(next));assert.notDeepEqual(original.schedule!.queues,next.schedule!.queues);
+ original.schedule!.running=true;const live=dispatchTables(original,1000);
+ assert.throws(()=>replaceRegistration(live,replacement),/现场对局/);
+});
 
 test('每桌需裁判，同一裁判只能一桌，同桌可多裁判',()=>{
   const s=emptySchedule();s.counts={gomoku:1,junqi:1};

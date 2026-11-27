@@ -13,18 +13,20 @@ import type {ArenaCall} from './TableBindingFields';
 import {ReportActions} from './ReportActions';
 import {refereeReport} from './event-reports';
 import {Check,ArrowLeft,ArrowRight} from 'lucide-react';
+import {validateNewEventPassword} from './event-password';
 export type NewEventRules=Record<'gomoku'|'junqi',TournamentRules>;
-export function EventForm({initial,creating,saving,onSave,members=[],call}:{initial:EventSettings;creating:boolean;saving:boolean;members?:RefereeOption[];call?:ArenaCall;onSave:(value:EventSettings,rules:NewEventRules,schedule:Schedule)=>Promise<void>}){
+export function EventForm({initial,creating,saving,onSave,members=[],call}:{initial:EventSettings;creating:boolean;saving:boolean;members?:RefereeOption[];call?:ArenaCall;onSave:(value:EventSettings,rules:NewEventRules,schedule:Schedule,password:string)=>Promise<void>}){
  const [draft,setDraft]=useState(()=>({...structuredClone(initial),autoBackup:creating?{enabled:false,intervalMinutes:10}:backupSettings(initial)})),[custom,setCustom]=useState(''),[error,setError]=useState('');
  const [rules,setRules]=useState<NewEventRules>(()=>({gomoku:defaultRules(),junqi:defaultRules()}));
  const [schedule,setSchedule]=useState(emptySchedule);
+ const [password,setPassword]=useState(''),[confirmation,setConfirmation]=useState('');
  const [step,setStep]=useState(0),[ruleSport,setRuleSport]=useState<'gomoku'|'junqi'>('gomoku'),[created,setCreated]=useState<RefereeOption[]>([]);
  const people=[...new Map([...members,...created].map(p=>[p.id,p])).values()];
  const steps=['赛事信息','赛制与奖项','棋盘与裁判','核对与创建'];
- useEffect(()=>{setError('');},[schedule,draft,rules]);
- function advance(){setError('');try{if(step===0)validateEvent(draft);if(step===1){validateRules(rules.gomoku);validateRules(rules.junqi);}if(step===2)validateTableBindings(schedule);setStep(step+1);}catch(e){setError((e as Error).message);}}
+ useEffect(()=>{setError('');},[schedule,draft,rules,password,confirmation]);
+ function advance(){setError('');try{if(step===0){validateEvent(draft);validateNewEventPassword(password,confirmation);}if(step===1){validateRules(rules.gomoku);validateRules(rules.junqi);}if(step===2)validateTableBindings(schedule);setStep(step+1);}catch(e){setError((e as Error).message);}}
  const colleges=[...new Set([...COLLEGES,...draft.colleges])];
- return <form className={'event-form '+(creating?'event-wizard':'')} onSubmit={async e=>{e.preventDefault();if(creating&&step<3){advance();return;}setError('');try{if(creating)validateTableBindings(schedule);await onSave(validateEvent(draft),{gomoku:validateRules(rules.gomoku),junqi:validateRules(rules.junqi)},schedule);}catch(err){setError((err as Error).message);}}}>
+ return <form className={'event-form '+(creating?'event-wizard':'')} onSubmit={async e=>{e.preventDefault();if(creating&&step<3){advance();return;}setError('');try{if(creating){validateTableBindings(schedule);validateNewEventPassword(password,confirmation);}await onSave(validateEvent(draft),{gomoku:validateRules(rules.gomoku),junqi:validateRules(rules.junqi)},schedule,creating?password:'');}catch(err){setError((err as Error).message);}}}>
  {creating&&<nav className="wizard-steps" aria-label="创建竞赛步骤">{steps.map((label,i)=><button type="button" key={label} disabled={i>step} aria-current={step===i?'step':undefined} onClick={()=>{setStep(i);setError('');}}><span>{i<step?<Check size={15}/>:i+1}</span><b>{label}</b></button>)}</nav>}
  <div className="wizard-stage">
  {(!creating||step===0)&&<>
@@ -33,6 +35,7 @@ export function EventForm({initial,creating,saving,onSave,members=[],call}:{init
  <fieldset><legend>举办学院（可多选）</legend><div className="event-colleges">{colleges.map(c=><label key={c}><input type="checkbox" checked={draft.colleges.includes(c)} onChange={e=>setDraft({...draft,colleges:e.target.checked?[...draft.colleges,c]:draft.colleges.filter(v=>v!==c)})}/>{c}</label>)}</div><div className="event-custom"><input aria-label="其他举办学院" placeholder="添加其他学院" maxLength={60} value={custom} onChange={e=>setCustom(e.target.value)}/><button type="button" className="button secondary small" onClick={()=>{const c=custom.trim();if(c&&!draft.colleges.includes(c)){setDraft({...draft,colleges:[...draft.colleges,c]});setCustom('');}}}>添加学院</button></div></fieldset>
  <div className="form-grid"><label>开始时间（北京时间）<input type="datetime-local" required value={draft.startsAt} onChange={e=>setDraft({...draft,startsAt:e.target.value})}/></label><label>结束时间（北京时间）<input type="datetime-local" required min={draft.startsAt} value={draft.endsAt} onChange={e=>setDraft({...draft,endsAt:e.target.value})}/></label></div>
  <label>比赛地点<input required maxLength={120} value={draft.venue} onChange={e=>setDraft({...draft,venue:e.target.value})}/></label>
+ {creating&&<fieldset className="creation-password"><legend>当前赛事密码（必填）</legend><p>裁判进入本场比赛，以及修改抽签和调度安排时使用。与裁判账号登录密码不同。</p><div className="form-grid"><label>设置赛事密码<input aria-label="创建赛事密码" type="password" autoComplete="new-password" minLength={8} value={password} onChange={e=>setPassword(e.target.value)}/></label><label>确认赛事密码<input aria-label="确认创建赛事密码" type="password" autoComplete="new-password" minLength={8} value={confirmation} onChange={e=>setConfirmation(e.target.value)}/></label></div><small>至少 8 个字符，最多 72 字节。密码不会写入导出的 PDF 或 JSON 备份。</small></fieldset>}
  </>}
  {creating&&step===1&&<><div className="wizard-stage-title"><span className="eyebrow">02 / COMPETITION RULES</span><h3>两个项目，各有清晰规则。</h3><p>默认并列两名季军，末三轮三局两胜。抽签后可按具体场次调整。</p></div><div className="sport-tabs">{(['gomoku','junqi'] as const).map(sp=><button type="button" key={sp} aria-pressed={ruleSport===sp} className={ruleSport===sp?'selected':''} onClick={()=>setRuleSport(sp)}>{sp==='gomoku'?'五子棋':'军棋'}</button>)}</div><fieldset><legend>{ruleSport==='gomoku'?'五子棋':'军棋'} · 赛制与奖项</legend><RuleFields value={rules[ruleSport]} prefix={ruleSport==='gomoku'?'五子棋':'军棋'} onChange={value=>setRules({...rules,[ruleSport]:value})}/></fieldset></>}
  {creating&&step===2&&<TableBindingFields value={schedule} onChange={setSchedule} members={people} call={call} onMemberCreated={p=>setCreated(old=>[...old,p])}/>}

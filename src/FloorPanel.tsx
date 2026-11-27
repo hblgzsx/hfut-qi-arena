@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { buildBracket, SPORT_NAMES } from './engine';
 import type { Sport, State } from './engine';
-import { emptySchedule, occupied, SPORTS, tableKey, tableName } from './scheduling';
+import { emptySchedule, occupied, SPORTS, tableKey, tableName,validateTableBindings } from './scheduling';
 import {eventId} from './cloud';
 import {TableBindingFields} from './TableBindingFields';
 import {EventDocuments} from './ReportActions';
+import {X} from 'lucide-react';
+import {validateNewEventPassword} from './event-password';
 
 export function FloorBoard({state,onRecord,userId}:{state:State;onRecord?:(sport:Sport,id:string)=>void;userId?:string}) {
   const s=state.schedule??emptySchedule();
@@ -29,26 +31,35 @@ export function FloorPanel({state,call,onChanged}:{state:State;call:(action:stri
   const [sport,setSport]=useState<Sport>('gomoku'),[counts,setCounts]=useState(s.counts);
   const [members,setMembers]=useState<{id:string;display_name:string;role:string}[]>([]);
   const [bindings,setBindings]=useState(s.bindings),[absent,setAbsent]=useState<string[]>([]),[priority,setPriority]=useState<string[]>([]);
-  const [password,setPassword]=useState(''),[newPassword,setNewPassword]=useState(''),[reason,setReason]=useState('现场配置');
+  const [password,setPassword]=useState(''),[newPassword,setNewPassword]=useState(''),[confirmPassword,setConfirmPassword]=useState(''),[reason,setReason]=useState('');
+  const [pending,setPending]=useState<{command:Record<string,unknown>;revision:string}|null>(null),[verificationError,setVerificationError]=useState('');
   const [message,setMessage]=useState(''),[busy,setBusy]=useState(false);
   const [tab,setTab]=useState<'live'|'tables'|'draw'|'documents'|'security'>('live'),[search,setSearch]=useState(''),[filter,setFilter]=useState<'all'|'absent'|'priority'>('all');
   const [rollPage,setRollPage]=useState(0);
   const [dirty,setDirty]=useState(false);
   const [bindingBase,setBindingBase]=useState(()=>JSON.stringify([s.counts,s.bindings]));
   const bindingConflict=dirty&&bindingBase!==JSON.stringify([s.counts,s.bindings]);
-  const [queue,setQueue]=useState(s.queues[sport].join('\n'));
+  const [queueDrafts,setQueueDrafts]=useState({gomoku:s.queues.gomoku.join('\n'),junqi:s.queues.junqi.join('\n')}),[queueDirty,setQueueDirty]=useState({gomoku:false,junqi:false}),[queueBases,setQueueBases]=useState({gomoku:s.queues.gomoku.join('\n'),junqi:s.queues.junqi.join('\n')});
+  const queue=queueDrafts[sport],queueConflict=queueDirty[sport]&&queueBases[sport]!==s.queues[sport].join('\n');
+  function setQueue(value:string){setQueueDrafts(old=>({...old,[sport]:value}));setQueueDirty(old=>({...old,[sport]:true}));}
   useEffect(()=>{void call('members').then(data=>setMembers((data.profiles??[]).filter((p:any)=>p.role==='referee'))).catch(e=>setMessage(e.message));},[]);
   useEffect(()=>{setAbsent([]);setPriority([]);},[sport]);
-  useEffect(()=>{setQueue(s.queues[sport].join('\n'));},[sport,state.revision]);
+  useEffect(()=>{for(const sp of SPORTS)if(!queueDirty[sp]){const value=s.queues[sp].join('\n');setQueueDrafts(old=>({...old,[sp]:value}));setQueueBases(old=>({...old,[sp]:value}));}},[state.revision,queueDirty]);
   useEffect(()=>{if(!dirty){setCounts(s.counts);setBindings(s.bindings);setBindingBase(JSON.stringify([s.counts,s.bindings]));}},[state.revision,dirty]);
   useEffect(()=>{setRollPage(0);},[search,filter,sport]);
-  async function run(command:Record<string,unknown>) {
+  function run(command:Record<string,unknown>){
+    try{if(command.type==='configure')validateTableBindings({...s,counts,bindings});if(command.type==='draw'&&state.tournaments[command.sport as Sport].players.filter(p=>!(command.absent as string[]).includes(p.id)).length<2)throw new Error('至少需要 2 名到场选手才能抽签。');}catch(e){setMessage((e as Error).message);return;}
+    if(command.type==='begin'){void execute(command,state.revision);return;}
+    setPending({command:structuredClone(command),revision:state.revision});setPassword('');setReason('');setVerificationError('');
+  }
+  async function execute(command:Record<string,unknown>,revision:string) {
     setBusy(true);setMessage('');
     try {
-      await call('schedule',{command,password,reason,expectedRevision:state.revision});
+      await call('schedule',{command,password,reason,expectedRevision:revision});
       if(command.type==='configure')setDirty(false);
-      setPassword('');onChanged();setMessage('现场调度已保存。');
-    } catch(e) {setMessage((e as Error).message);}
+      if(command.type==='reorder'||command.type==='draw')setQueueDirty(old=>({...old,[command.sport as Sport]:false}));
+      setPassword('');setReason('');setPending(null);onChanged();setMessage('现场调度已保存。');
+    } catch(e) {if(pending)setVerificationError((e as Error).message);else setMessage((e as Error).message);}
     finally {setBusy(false);}
   }
   const t=state.tournaments[sport];
@@ -56,15 +67,13 @@ export function FloorPanel({state,call,onChanged}:{state:State;call:(action:stri
   return <div className="floor-panel">
     <div className="floor-context"><span className="eyebrow">EVENT OPERATIONS</span><h2>{state.event?.name}</h2><p>正在管理本场赛事 · 桌号、裁判、候场与导出资料均独立保存</p></div>
     <nav className="operations-tabs" aria-label="现场调度分区">{([['live','现场运行'],['tables','棋盘与裁判'],['draw','检录与抽签'],['documents','资料与打印'],['security','赛事密码']] as const).map(([key,label])=><button type="button" key={key} aria-pressed={tab===key} className={tab===key?'selected':''} onClick={()=>setTab(key)}>{label}</button>)}</nav>
-    {tab!=='documents'&&<details className="operation-auth" open={tab==='security'}><summary>操作验证 · 当前赛事密码与原因</summary>
-    <label>当前赛事密码<input type="password" autoComplete="off" value={password} onChange={e=>setPassword(e.target.value)}/></label>
-    <label>操作原因<input value={reason} onChange={e=>setReason(e.target.value)} maxLength={200}/></label>
-    </details>}
     {tab==='security'&&<section className="operations-section"><h3>本场赛事的进入与修改凭证</h3><p>裁判登录账号后，还需输入本场赛事密码。修改密码后，裁判需要重新验证。</p>
+    <label>原赛事密码（修改时必填，旧比赛首次补设可留空）<input type="password" autoComplete="off" value={password} onChange={e=>setPassword(e.target.value)}/></label>
     <label>新密码（首次设置 / 修改，至少 8 字符）<input type="password" autoComplete="new-password" value={newPassword} onChange={e=>setNewPassword(e.target.value)}/></label>
+    <label>确认新赛事密码<input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}/></label>
     <button className="button secondary" disabled={busy||newPassword.length<8} onClick={async()=>{
       setBusy(true);
-      try{await call('event-password',{password,newPassword});setNewPassword('');setPassword('');setMessage('赛事密码已更新，裁判需重新验证。');}catch(e){setMessage((e as Error).message);}finally{setBusy(false);}
+      try{validateNewEventPassword(newPassword,confirmPassword);await call('event-password',{password,newPassword});setNewPassword('');setConfirmPassword('');setPassword('');setMessage('赛事密码已更新，裁判需重新验证。');}catch(e){setMessage((e as Error).message);}finally{setBusy(false);}
     }}>设置 / 修改赛事密码</button>
     </section>}
     {tab==='tables'&&<section className="operations-section">
@@ -85,12 +94,13 @@ export function FloorPanel({state,call,onChanged}:{state:State;call:(action:stri
       <label><input type="checkbox" disabled={absent.includes(p.id)} checked={priority.includes(p.id)} onChange={e=>setPriority(e.target.checked?[...priority,p.id]:priority.filter(id=>id!==p.id))}/>优先 {priority.includes(p.id)?priority.indexOf(p.id)+1:''}</label>
     </div>)}</div>
     <div className="roll-pagination"><button className="button secondary small" disabled={!rollPage} onClick={()=>setRollPage(n=>n-1)}>上一页</button><span>共 {roll.length} 人 · {rollPage+1} / {Math.max(1,Math.ceil(roll.length/12))} 页</span><button className="button secondary small" disabled={(rollPage+1)*12>=roll.length} onClick={()=>setRollPage(n=>n+1)}>下一页</button></div>
-    <button className="button primary" disabled={busy} onClick={()=>{if(confirm('确认按已到场名单抽签并锁定顺序？重新抽签会清空本项目成绩。'))void run({type:'draw',sport,absent,priority});}}>确认到场名单并抽签锁定</button>
+    <button className="button primary" disabled={busy} onClick={()=>run({type:'draw',sport,absent,priority})}>确认到场名单并抽签锁定</button>
     </section>}
     {tab==='live'&&<section className="operations-section"><p>一桌完赛即补台，允许已确定双方的后续轮次提前开赛，选手休息 3 分钟；兼项不重复占桌。</p>
     <h3>已锁定候场顺序</h3><p>修改顺序需要重新输入赛事密码和原因。已叫号对局保持原桌。</p>
     <details><summary>调整候场顺序（需赛事密码）</summary><textarea aria-label="候场场次顺序" value={queue} onChange={e=>setQueue(e.target.value)} rows={5}/>
-    <button className="button secondary" disabled={busy} onClick={()=>void run({type:'reorder',sport,queue:queue.split(/\s+/).filter(Boolean)})}>保存候场顺序</button>
+    {queueConflict&&<p role="alert" className="wizard-error">候场顺序已被其他管理员修改，请重新加载后编辑。<button className="text-button" onClick={()=>setQueueDirty(old=>({...old,[sport]:false}))}>重新载入顺序</button></p>}
+    <button className="button secondary" disabled={busy||queueConflict} onClick={()=>void run({type:'reorder',sport,queue:queue.split(/\s+/).filter(Boolean)})}>保存候场顺序</button>
     </details>
     <button className="button primary" disabled={busy} onClick={()=>void run({type:'start'})}>开始 / 恢复自动叫号</button>
     <button className="button secondary" disabled={busy||!s.running} onClick={()=>void run({type:'pause'})}>暂停补台，保留现场对局</button>
@@ -99,6 +109,12 @@ export function FloorPanel({state,call,onChanged}:{state:State;call:(action:stri
     </section>}
     {tab==='documents'&&<>{dirty&&<p className="wizard-error">有未保存的裁判编排，此处导出上一次已保存的正式安排。请先回到“棋盘与裁判”保存。</p>}<EventDocuments state={state} members={members}/></>}
     <p role="status">{message}</p>
+    {pending&&<div className="verification-overlay"><form className="verification-dialog" role="dialog" aria-modal="true" aria-label="确认现场修改" onSubmit={e=>{e.preventDefault();if(!password){setVerificationError('请输入当前赛事密码。');return;}if(reason.trim().length<2){setVerificationError('请填写至少 2 字的操作原因。');return;}void execute(pending.command,pending.revision);}} onKeyDown={e=>{if(e.key==='Escape'&&!busy){setPending(null);setPassword('');}}}>
+      <header><div><span className="eyebrow">CONFIRM CHANGE</span><h3>确认现场修改</h3></div><button type="button" className="icon-button" aria-label="取消现场修改" disabled={busy} onClick={()=>{setPending(null);setPassword('');}}><X size={20}/></button></header><p>{state.event?.name}</p><strong>{({configure:'保存棋盘与裁判绑定',draw:'按到场名单抽签并锁定',reorder:'修改候场顺序',start:'启动自动叫号',pause:'暂停自动补台',cancel:'取消叫号并暂停调度'} as Record<string,string>)[String(pending.command.type)]??'修改现场调度'}</strong>
+      {pending.command.type==='draw'&&<p className="wizard-error">本次将剔除未到场选手，并重新生成该项目抽签；已有成绩会清空。</p>}
+      <label>当前赛事密码<input autoFocus type="password" autoComplete="off" value={password} onChange={e=>setPassword(e.target.value)}/></label><label>本次修改原因<input maxLength={200} value={reason} onChange={e=>setReason(e.target.value)} placeholder="说明为什么需要这次修改"/></label>
+      {pending.revision!==state.revision&&<p className="wizard-error">赛事数据已更新，请取消并核对最新赛况后重新提交。</p>}{verificationError&&<p role="alert" className="wizard-error">{verificationError}</p>}<footer><button type="button" className="button secondary" disabled={busy} onClick={()=>{setPending(null);setPassword('');}}>取消</button><button className="button primary" disabled={busy||pending.revision!==state.revision} type="submit">{busy?'正在验证保存…':'验证并保存修改'}</button></footer>
+    </form></div>}
   </div>;
 }
 

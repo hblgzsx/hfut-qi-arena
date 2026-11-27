@@ -72,7 +72,7 @@ export function App() {
   }, []);
   const activeEvents=events.filter(e=>eventIsActive(e,clock+serverOffset));
   const refereeActive=!cloud.unavailable&&activeEvents.some(e=>e.id===eventId);
-  const hasSelectedEvent=!cloud.enabled||(!cloud.loading&&!cloud.unavailable&&!!new URLSearchParams(location.search).get('event'));
+  const hasSelectedEvent=!cloud.enabled||(!cloud.loading&&!cloud.unavailable&&new URLSearchParams(location.search).get('event')===eventId);
   const isLobby=cloud.enabled&&canAdmin&&!hasSelectedEvent;
   useEffect(()=>{if(cloud.profile?.role==='referee'&&!refereeActive&&activeEvents.length)location.replace(eventUrl(activeEvents[0].id));},[cloud.profile?.role,refereeActive,activeEvents.map(e=>e.id).join(',')]);
   const [sport, setSport] = useState<Sport>('gomoku'), [page, setPage] = useState<Page>(projection ? 'bracket' : 'overview');

@@ -2,6 +2,8 @@ import {defaultRules,validateRules} from './tournament-rules.ts';
 import type {TournamentRules} from './tournament-rules.ts';
 import { validateEvent } from './event-settings.ts';
 import type { EventSettings } from './event-settings.ts';
+import { validateSchedule } from './scheduling.ts';
+import type { Schedule } from './scheduling.ts';
 export type Sport = 'gomoku' | 'junqi';
 export type Outcome = 'A' | 'B' | 'D';
 export interface Player { id: string; name: string; studentId: string; college: string; phone: string; qq: string; gender: string }
@@ -9,7 +11,7 @@ export interface Result { kind: 'played' | 'forfeit' | 'double' | 'adjudicated';
 export interface Tournament { rules?:TournamentRules; sport: Sport; players: Player[]; seeds: (string | null)[]; drawSeed: string; drawnAt: string; results: Record<string, Result>; mode: 'flip' | 'layout'; demo: boolean }
 export interface Prize { rank: string; name: string; description: string; image: string }
 export interface Audit { id: string; time: string; sport: Sport; message: string }
-export interface State { version: 1; revision: string; event?:EventSettings; tournaments: Record<Sport, Tournament>; prizes: Record<Sport, Prize[]>; audit: Audit[] }
+export interface State { version: 1; revision: string; event?:EventSettings; schedule?: Schedule; tournaments: Record<Sport, Tournament>; prizes: Record<Sport, Prize[]>; audit: Audit[] }
 export interface Slot { id: string | null; settled: boolean; source: string }
 export interface Match { id: string; round: number; index: number; label: string; bestOf: 1 | 3; a: Slot; b: Slot; score: [number, number]; result?: Result; resolved: boolean; winner: string | null; bye: boolean; ready: boolean }
 
@@ -176,6 +178,7 @@ export function validateState(input: unknown): State {
     if (!Array.isArray(s.prizes[sport]) || s.prizes[sport].length !== 3 || s.prizes[sport].some(p => !p || [p.rank, p.name, p.description, p.image].some(v => typeof v !== 'string') || p.name.length > 80 || p.description.length > 200 || p.image.length > 500000 || (p.image && !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(p.image)))) throw new Error('奖品资料不正确。');
   }
   if (s.audit.length > 200 || s.audit.some(a => !a || !['gomoku', 'junqi'].includes(a.sport) || [a.id, a.time, a.message].some(v => typeof v !== 'string'))) throw new Error('操作记录不正确。');
+  validateSchedule(s);
   return s;
 }
 export function demoState(): State {

@@ -7,6 +7,7 @@ export function matchSignature(s:State,sport:Sport,id:string):string {
 export function redactState(s:State,role:'public'|'referee'|'admin'):State {
   if(role==='admin'){const result=structuredClone(s);for(const t of Object.values(result.tournaments))t.players=t.players.map(p=>{const {phone,qq,...safe}=p;void phone;void qq;return safe as typeof p;});return result;}
   const result=structuredClone(s);result.audit=[];
+  if(role==='public' && result.schedule) result.schedule.bindings={};
   for(const sport of ['gomoku','junqi'] as Sport[]){
     const t=result.tournaments[sport];
     t.players=t.players.map(p=>{const {phone,qq,...safe}=p;void phone;void qq;return {...safe,studentId:role==='public'?p.id:p.studentId,gender:''} as typeof p;});

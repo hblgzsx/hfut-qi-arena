@@ -8,4 +8,5 @@ import './competition.css';
 import './theme-light.css';
 import './theme.css';
 import './experience.css';
+import './floor.css';
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);

@@ -177,6 +177,7 @@ Deno.serve(async req=>{
         state=data?next:await load();
       }
     }
+    if(!state)return reply({error:'竞赛已不存在，请刷新'},404);
     if (body.action==='schedule') {
       if(!admin && body.command?.type!=='begin') return reply({error:'仅管理员可修改调度'},403);
       if(body.command?.type!=='begin') {
@@ -196,7 +197,8 @@ Deno.serve(async req=>{
       }
       const next=validateState(scheduleAction(state,body.command));
       next.revision=crypto.randomUUID();
-      next.audit=[{id:crypto.randomUUID(),time:new Date().toISOString(),sport:body.command?.sport==='junqi'?'junqi':'gomoku',message:'现场调度 '+body.command?.type+' · '+profile.display_name+' · '+String(body.reason??'确认开赛').slice(0,200)},...state.audit].slice(0,200);
+      const auditSport:Sport=body.command?.sport==='junqi'?'junqi':'gomoku';
+      next.audit=[{id:crypto.randomUUID(),time:new Date().toISOString(),sport:auditSport,message:'现场调度 '+body.command?.type+' · '+profile.display_name+' · '+String(body.reason??'确认开赛').slice(0,200)},...state.audit].slice(0,200);
       const {data,error}=await db.rpc('arena_commit',{p_id:eventId,p_revision:state.revision,p_state:next,p_public:redactState(next,'public'),p_actor:user.id});
       if(error) throw error;
       if(!data) return reply({error:'调度提交冲突，请刷新后重试'},409);

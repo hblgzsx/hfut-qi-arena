@@ -3,6 +3,7 @@ import {pendingResultJobs,rememberResultJob,forgetResultJob,resultDeliveryId,res
 import {flushBroadcastReceipts} from './broadcast-lease';
 import {BroadcastConsole} from './BroadcastConsole';
 import {setResultSpeechEnabled} from './SpeechControls';
+import {signOutCurrentDevice} from './sign-out';
 import {DataTable} from './DataTable';
 import {RefereeManagement} from './RefereeManagement';
 import {EventLobby} from './EventLobby';
@@ -53,6 +54,7 @@ const NAV = [{id:'floor',label:'现场调度',icon:Monitor},{ id:'overview', lab
 
 export function App() {
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [signingOut,setSigningOut]=useState(false);
   const [broadcastConsole,setBroadcastConsole]=useState(false);
   const [callQueueEnabled,setCallQueueEnabled]=useState(false);
   const [refereeOptions,setRefereeOptions]=useState<{id:string;display_name:string;role:string}[]>([]);
@@ -111,6 +113,7 @@ export function App() {
   const eventFinished = !!rounds.length&&matches.every(m=>m.resolved);
   const allCount = matches.length ? matches.filter(m=>!m.bye).length : Math.max(0, tournament.players.length - 1), currentRound = rounds.findIndex(r => r.some(m => !m.resolved));
   const flash = (text: string) => { setNotice(text); setTimeout(() => setNotice(''), 4500); };
+  async function signOut(){if(signingOut||saving)return;setSigningOut(true);try{const message=await signOutCurrentDevice();setAccount(false);setBroadcastConsole(false);setCallQueueEnabled(false);setQueueOverride(false);setAnnouncement(null);setModal(null);setProjection(false);accountWork.current={busy:false,unsaved:false};await cloud.refresh();flash(message);}catch(e){flash('退出失败：'+(e as Error).message);}finally{setSigningOut(false);}}
   useEffect(()=>{if(cloud.remote){if(!initialRemote.current){previous.current=cloud.remote;initialRemote.current=true;}setState(cloud.remote);}},[cloud.remote]);
   useLayoutEffect(()=>{if(previous.current){const changes=queue.current.reserve(completedChanges(previous.current,state));for(const event of changes)if(canAdmin&&queueEnabled&&resultAfterLogin(event.match.result?.updatedAt,queueSince)){rememberResultJob(eventId,event.key);if(projection){reserveResult(eventId,event.key);orderedResults.current.add(event.key);}}if(changes.length)setTimeout(()=>{queue.current.append(changes);setQueueTick(n=>n+1);},2000);}previous.current=state;},[state]);
   useEffect(()=>{if(!canAdmin||!queueEnabled||!projection||cloud.loading||(cloud.enabled&&state!==cloud.remote))return;const jobs=pendingResultJobs(eventId),valid=recoverAnnouncements(state).filter(e=>resultAfterLogin(e.match.result?.updatedAt,queueSince)),keys=new Set(valid.map(e=>e.key));for(const key of jobs)if(!keys.has(key)){forgetResultJob(eventId,key);discardResult(eventId,key);orderedResults.current.delete(key);}const recovered=valid.filter(e=>jobs.includes(e.key)&&!resultWasDelivered(eventId,resultDeliveryId(e)));for(const e of recovered)if(!orderedResults.current.has(e.key)){reserveResult(eventId,e.key);orderedResults.current.add(e.key);}const missing=queue.current.reserve(recovered);if(missing.length){queue.current.append(missing);setQueueTick(n=>n+1);}},[state,projection,queueEnabled,canAdmin,cloud.loading]);
@@ -220,7 +223,7 @@ export function App() {
     </aside>}
     {projection&&<Arena state={state} initialSport={sport} onExit={exitArena} onRecord={arenaRecord} onTableRecord={arenaTableRecord} onBegin={beginTable} userId={cloud.profile?.role==='referee'?cloud.profile.id:undefined} onAwards={()=>{exitArena();setPage('prizes');}} canRecord={canRecord} connection={cloud.status} queueEnabled={queueEnabled} onToggleQueue={toggleQueue} onBackdrop={()=>setBackdrop(true)} onBroadcastConsole={canAdmin&&hasSelectedEvent?()=>setBroadcastConsole(true):undefined} callQueueEnabled={callQueueEnabled&&canAdmin} queueSince={queueSince}/>}
     <div className="main-shell" data-sport={sport} style={projection?{display:'none'}:undefined}>
-      <header className="topbar"><div className="breadcrumb">{isLobby?'赛事中心':event.name} <ChevronRight size={14}/><b>{projection?'现场大屏':pageTitle}</b></div><div className="topbar-right"><EventClock offset={serverOffset} showDate/><span className="local-badge"><i/> {cloud.status}</span>{canAdmin&&hasSelectedEvent&&<button className="button secondary small" onClick={()=>setBroadcastConsole(true)}>播报控制台</button>}<button className="button secondary small" onClick={()=>setAccount(true)}><ShieldCheck size={14}/>{cloud.profile?.display_name??'邮箱登录'}</button>{!projection&&<button className="icon-button" aria-label="赛事帮助" title="赛事帮助" onClick={()=>setPage('rules')}><CircleHelp size={19}/></button>}<ThemeToggle/></div></header>
+      <header className="topbar"><div className="breadcrumb">{isLobby?'赛事中心':event.name} <ChevronRight size={14}/><b>{projection?'现场大屏':pageTitle}</b></div><div className="topbar-right"><EventClock offset={serverOffset} showDate/><span className="local-badge"><i/> {cloud.status}</span>{canAdmin&&hasSelectedEvent&&<button className="button secondary small" onClick={()=>setBroadcastConsole(true)}>播报控制台</button>}<button className="button secondary small" onClick={()=>setAccount(true)}><ShieldCheck size={14}/>{cloud.profile?.display_name??'邮箱登录'}</button>{!projection&&<button className="icon-button" aria-label="赛事帮助" title="赛事帮助" onClick={()=>setPage('rules')}><CircleHelp size={19}/></button>}{cloud.profile&&canAdmin&&<button className="button secondary small" disabled={signingOut||saving} onClick={()=>void signOut()}>{signingOut?'正在退出…':'退出登录'}</button>}<ThemeToggle/></div></header>
       <main>
         {isLobby?<EventLobby events={events} onCreate={()=>setModal('event-new')} onTrash={()=>{setModal('event-trash');void refreshEvents();}} onRefresh={()=>void refreshEvents()}/>:<>
         {error&&<div className="error-banner"><AlertTriangle size={18}/>{error}<button onClick={()=>download('弈境-原始数据.txt',new Blob([localStorage.getItem(KEY)??'']))}>下载原始数据</button><button onClick={()=>restoreRef.current?.click()}>恢复备份</button></div>}

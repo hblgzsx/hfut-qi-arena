@@ -2,11 +2,11 @@ import {TablePager} from './DataTable';
 import {useEffect,useRef,useState} from 'react';
 import {ArrowLeft,Users,UserPlus,Search,RefreshCw,Download,Upload,ShieldCheck,Trash2,X,RotateCcw,ChevronRight} from 'lucide-react';
 import type {Profile} from './cloud';
-import {supabase} from './cloud';
 import {canGrantRole,canDeleteReferee} from './access-policy';
 import {BulkReferees} from './BulkReferees';
 import {RefereeExport} from './RefereeExport';
 import {ThemeToggle} from './ThemeToggle';
+import {signOutCurrentDevice} from './sign-out';
 
 type Member=Profile&{created_at?:string;deleted_at?:string|null};
 type Credential={email:string;password:string;displayName:string};
@@ -25,6 +25,7 @@ export function RefereeManagement({profile,call,onBack,onChanged,onWorkState}:{p
  const request=useRef(0),listTab=['directory','permissions','trash'].includes(tab);
  const refresh=()=>setTick(n=>n+1);
  const unsaved=batchUnsaved||!!credential&&!credentialSaved;
+ async function signOut(){if(busy)return;if(unsaved&&!confirm('有新裁判密码尚未保存，退出后将无法再次查看。建议先取消并导出含密码的登录信息。仍要退出登录吗？'))return;await act(async()=>{await signOutCurrentDevice();onChanged();});}
  useEffect(()=>{onWorkState(busy,unsaved);},[busy,unsaved]);
  useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(busy||unsaved){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[busy,unsaved]);
  useEffect(()=>{
@@ -43,8 +44,8 @@ export function RefereeManagement({profile,call,onBack,onChanged,onWorkState}:{p
  function toggle(person:Member){setChosen(old=>{const next={...old};if(next[person.id])delete next[person.id];else next[person.id]=person;return next;});}
  const visibleRefs=people.filter(p=>p.role==='referee'&&!p.deleted_at),selected=Object.values(chosen);
  const credentialPanel=credential&&<section className="manager-credential" role="region" aria-label="新裁判登录信息"><header><div><span className="eyebrow">SAVE CREDENTIALS</span><h3>{credential.displayName} · 登录信息</h3><p>{credential.email}</p></div><button className="icon-button" aria-label="关闭当前密码" disabled={busy} onClick={()=>{if(readyForCredential()){setCredential(null);setCredentialSaved(false);}}}><X size={19}/></button></header><label>随机密码（仅本次可见）<input value={credential.password} readOnly autoComplete="off"/></label><RefereeExport title="导出当前裁判登录信息" format="txt" rows={[{name:credential.displayName,email:credential.email,password:credential.password}]} onExport={emails=>{if(emails.includes(credential.email))setCredentialSaved(true);}}/><span>{credentialSaved?'登录信息已保存':'关闭前请保存密码，未勾选密码的导出不算保存密码。'}</span></section>;
- return <div className="referee-management" role="region" aria-label="裁判管理中心"><header className="manager-header"><button className="button secondary small" onClick={onBack} disabled={busy}><ArrowLeft size={16}/>返回赛事</button><div><span className="eyebrow">QI ARENA / PEOPLE</span><b>裁判管理中心</b></div><span className="manager-identity">{profile.display_name} · {labels[profile.role]}</span><ThemeToggle/></header>
- <div className="manager-layout"><aside className="manager-nav"><div className="manager-nav-title">人员与权限</div>{tabs.filter(([key])=>root||!['permissions','trash'].includes(key)).map(([key,label,Icon])=><button key={key} disabled={busy} className={tab===key?'selected':''} aria-current={tab===key?'page':undefined} onClick={()=>navigate(key)}><Icon size={18}/>{label}{key==='export'&&selected.length>0&&<small>{selected.length}</small>}</button>)}<div className="manager-nav-note">裁判目录独立于单场赛事。删除前检查全部比赛绑定，历史记录保持可查。</div><button className="manager-signout" disabled={busy||unsaved} onClick={()=>void act(async()=>{await supabase!.auth.signOut();onChanged();})}>退出登录</button></aside>
+ return <div className="referee-management" role="region" aria-label="裁判管理中心"><header className="manager-header"><button className="button secondary small" onClick={onBack} disabled={busy}><ArrowLeft size={16}/>返回赛事</button><div><span className="eyebrow">QI ARENA / PEOPLE</span><b>裁判管理中心</b></div><span className="manager-identity">{profile.display_name} · {labels[profile.role]}</span><button className="button secondary small" disabled={busy} onClick={()=>void signOut()}>{busy?'正在处理…':'退出登录'}</button><ThemeToggle/></header>
+ <div className="manager-layout"><aside className="manager-nav"><div className="manager-nav-title">人员与权限</div>{tabs.filter(([key])=>root||!['permissions','trash'].includes(key)).map(([key,label,Icon])=><button key={key} disabled={busy} className={tab===key?'selected':''} aria-current={tab===key?'page':undefined} onClick={()=>navigate(key)}><Icon size={18}/>{label}{key==='export'&&selected.length>0&&<small>{selected.length}</small>}</button>)}<div className="manager-nav-note">裁判目录独立于单场赛事。删除前检查全部比赛绑定，历史记录保持可查。</div><button className="manager-signout" disabled={busy} onClick={()=>void signOut()}>退出登录</button></aside>
  <main className="manager-main"><div className="manager-title"><div><span className="eyebrow">{tab==='directory'?'REFEREE DIRECTORY':tab==='trash'?'RECYCLE BIN':'PEOPLE WORKSPACE'}</span><h1>{tabs.find(([key])=>key===tab)?.[1]}</h1><p>{tab==='directory'?'按姓名或邮箱检索，不必在弹窗中翻找所有人。':tab==='permissions'?'高级权限集中管理，不与裁判日常操作混排。':tab==='trash'?'仅超级管理员可恢复，恢复后需要重新安排比赛。':tab==='export'?'先在裁判目录勾选人员，跨页保留选择，再选择需要的字段。':'创建和导入集中处理，新密码保存后再离开此页面。'}</p></div>{listTab&&<button className="button secondary small" disabled={loading||busy} onClick={refresh}><RefreshCw size={15}/>刷新目录</button>}</div>
  {message&&<p className="manager-notice" role="status">{message}</p>}{error&&<p className="wizard-error" role="alert">{error}</p>}
  <div className="manager-stats"><div><Users size={19}/><span>可用裁判</span><b>{counts.referee??'—'}</b></div><div><ShieldCheck size={19}/><span>停用账号</span><b>{counts.blocked??'—'}</b></div><div><Download size={19}/><span>已选导出</span><b>{selected.length}</b></div>{root&&<div><Trash2 size={19}/><span>已删除裁判</span><b>{counts.deleted??'—'}</b></div>}</div>

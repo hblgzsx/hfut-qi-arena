@@ -1,5 +1,6 @@
 import { buildBracket, draw, seededRandom, SPORT_NAMES } from './engine.ts';
 import type { Sport, State } from './engine.ts';
+import {restMinutes} from './event-settings.ts';
 
 export const SPORTS: Sport[] = ['gomoku', 'junqi'];
 export interface TableAssignment {
@@ -101,7 +102,7 @@ export function dispatchTables(input: State, now = Date.now()): State {
     for (const id of a.players) {
       const key = identity(state, a.sport, id);
       if (occupied(a)) busy.add(key);
-      if (a.status === 'finished') rested.set(key, Math.max(rested.get(key) ?? 0, (a.finishedAt ?? now) + 180000));
+      if (a.status === 'finished') rested.set(key, Math.max(rested.get(key) ?? 0, (a.finishedAt ?? now) + restMinutes(state.event)*60000));
     }
   }
   // Project order breaks simultaneous cross-project conflicts deterministically.

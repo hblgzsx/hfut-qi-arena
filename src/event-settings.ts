@@ -1,5 +1,7 @@
 export interface BackupSettings { enabled:boolean; intervalMinutes:number }
-export interface EventSettings { name:string; colleges:string[]; startsAt:string; endsAt:string; venue:string; autoBackup?:BackupSettings }
+export interface EventSettings { name:string; colleges:string[]; startsAt:string; endsAt:string; venue:string; autoBackup?:BackupSettings;restMinutes?:number }
+export function restMinutes(event?:EventSettings){return event?.restMinutes??3;}
+export function validateRestMinutes(value:unknown):number{if(typeof value!=='number'||!Number.isInteger(value)||value<0||value>120)throw new Error('选手休息时间须为 0 至 120 分钟的整数。');return value;}
 export function backupSettings(event?:EventSettings):BackupSettings {
  return event?.autoBackup??{enabled:false,intervalMinutes:10};
 }
@@ -15,6 +17,7 @@ export function validateEvent(value:unknown):EventSettings{
  const valid=(s:unknown)=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'+08:00'));
  if(!valid(v.startsAt)||!valid(v.endsAt)||v.endsAt<=v.startsAt)throw new Error('请填写有效的比赛时间，结束时间须晚于开始时间。');
  if(v.autoBackup!==undefined&&(!v.autoBackup||typeof v.autoBackup.enabled!=='boolean'||!Number.isInteger(v.autoBackup.intervalMinutes)||v.autoBackup.intervalMinutes<1||v.autoBackup.intervalMinutes>120))throw new Error('自动备份间隔须为 1 至 120 分钟。');
+ if(v.restMinutes!==undefined)validateRestMinutes(v.restMinutes);
  return {...v,name:v.name.trim(),venue:v.venue.trim(),colleges:v.colleges.map(c=>c.trim())};
 }
 export function eventDate(e:EventSettings){return new Date(e.startsAt+'+08:00').toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'long',day:'numeric',weekday:'long'});}

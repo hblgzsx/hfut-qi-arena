@@ -1,6 +1,7 @@
 import { buildBracket } from './engine.ts';
 import type { Sport, State, Tournament } from './engine.ts';
 import { dispatchTables, emptySchedule, occupied, prepareDraw, SPORTS, tableKey,validateTableBindings } from './scheduling.ts';
+import {defaultEvent,validateRestMinutes} from './event-settings.ts';
 export function replaceRegistration(state:State,tournaments:Record<Sport,Tournament>):State{
  if(state.schedule?.assignments.some(occupied))throw new Error('已有叫号或进行中的对局，请先处理现场对局，再替换报名名单。');
  const next=structuredClone(state);next.tournaments=structuredClone(tournaments);
@@ -16,7 +17,9 @@ export function scheduleAction(input: State, command: Record<string, any>, now=D
     if (!SPORTS.includes(sport) || !Array.isArray(command.absent) || !Array.isArray(command.priority)) throw new Error('抽签参数无效。');
     return prepareDraw(next,sport,command.absent,command.priority);
   }
-  if (command.type === 'configure') {
+  if (command.type === 'rest') {
+    const restMinutes=validateRestMinutes(command.minutes);next.event={...(next.event??defaultEvent()),restMinutes};
+  } else if (command.type === 'configure') {
     if (s.running) throw new Error('请先暂停调度，再设置棋盘和裁判。');
     if (s.assignments.some(a=>occupied(a)&&a.table>command.counts?.[a.sport])) throw new Error('缩减数量将移除正在使用的棋盘，请先完成该桌比赛。');
     s.counts = command.counts;
@@ -55,7 +58,7 @@ export function mayScoreTable(state: State, user: string, sport: Sport, match: s
   return !!a && keys?.length===1 && keys[0]===tableKey(sport,a.table);
 }
 export function scheduleProtected(before:State,after:State) {
-  return JSON.stringify(before.schedule)!==JSON.stringify(after.schedule) ||
+  return (before.event?.restMinutes??3)!==(after.event?.restMinutes??3)||JSON.stringify(before.schedule)!==JSON.stringify(after.schedule) ||
     SPORTS.some(sport=>!!before.tournaments[sport].seeds.length &&
       (JSON.stringify(before.tournaments[sport].seeds)!==JSON.stringify(after.tournaments[sport].seeds) ||
        before.tournaments[sport].drawnAt!==after.tournaments[sport].drawnAt ||

@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {emptyState,emptyTournament,buildBracket,setResult,validateState} from '../src/engine.ts';
 import {prepareDraw,dispatchTables,occupied,tableKey,assertSafeCorrection,emptySchedule,validateTableBindings} from '../src/scheduling.ts';
-import {scheduleAction,mayScoreTable,assertNoLiveReplacement,replaceRegistration} from '../src/schedule-actions.ts';
+import {scheduleAction,mayScoreTable,assertNoLiveReplacement,replaceRegistration,scheduleProtected} from '../src/schedule-actions.ts';
+import {defaultEvent,restMinutes} from '../src/event-settings.ts';
 
 function roster(n=16) {
   const state=emptyState();
@@ -84,6 +85,16 @@ test('部分比分继续占桌，完赛补台，休息180秒后可跨轮开赛',
   assert.equal(dispatchTables(state,182999).schedule!.assignments.filter(occupied).length,0);
   state=dispatchTables(state,183000);
   assert.equal(state.schedule!.assignments.at(-1)!.match,'R2-M1');
+});
+test('中途改变休息时间按上场结束时刻重算，零间隔立即补台，已叫号和对手不变',()=>{
+ let state=prepareDraw(roster(4),'gomoku',[],[],'mid-rest');state.event=defaultEvent();state.schedule!.counts.gomoku=2;state.schedule!.running=true;state=dispatchTables(state,1000);
+ const active=state.schedule!.assignments.filter(occupied);for(const a of active)state.tournaments.gomoku=setResult(state.tournaments.gomoku,a.match,{kind:'played',games:['A','A'],first:'A',referee:'裁判',reason:'',updatedAt:new Date().toISOString()});
+ state=dispatchTables(state,2000);assert.equal(state.schedule!.assignments.filter(occupied).length,0);const signature=JSON.stringify([state.tournaments,state.schedule!.queues,state.schedule!.bindings]);
+ const longer=scheduleAction(state,{type:'rest',minutes:5},62000);assert.equal(restMinutes(longer.event),5);assert.equal(dispatchTables(longer,301999).schedule!.assignments.filter(occupied).length,0);assert.equal(dispatchTables(longer,302000).schedule!.assignments.filter(occupied).length,1);
+ const shorter=scheduleAction(longer,{type:'rest',minutes:1},62000);assert.equal(shorter.schedule!.assignments.filter(occupied).length,1);assert.equal(JSON.stringify([shorter.tournaments,shorter.schedule!.queues,shorter.schedule!.bindings]),signature);
+ const called=shorter.schedule!.assignments.find(occupied)!;const changed=scheduleAction(shorter,{type:'rest',minutes:120},63000);assert.equal(changed.schedule!.assignments.find(a=>a.id===called.id)!.status,'called');assert.deepEqual(changed.schedule!.assignments.find(a=>a.id===called.id)!.players,called.players);
+ const zero=scheduleAction(state,{type:'rest',minutes:0},2000);assert.equal(zero.schedule!.assignments.filter(occupied).length,1);for(const minutes of [-1,121,0.5,'3'])assert.throws(()=>scheduleAction(state,{type:'rest',minutes},2000));
+ assert.ok(scheduleProtected(state,longer));
 });
 test('裁判绑定由后端规则检查，未分配或非负责棋盘不可提交',()=>{
   let state=prepareDraw(roster(8),'gomoku',[],[],'bind');

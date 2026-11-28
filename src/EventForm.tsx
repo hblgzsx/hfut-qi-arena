@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-import {COLLEGES,validateEvent,backupSettings} from './event-settings';
+import {COLLEGES,validateEvent,backupSettings,restMinutes} from './event-settings';
 import {BackupFields} from './AutoBackup';
 import type {EventSettings} from './event-settings';
 import {RuleFields} from './RuleFields';
@@ -46,6 +46,7 @@ export function EventForm({initial,creating,saving,onSave,members=[],call,draftO
  {(!creating||step===3)&&<>
  {creating&&<><div className="wizard-stage-title"><span className="eyebrow">04 / READY TO LAUNCH</span><h3>核对安排，准备开启比赛。</h3><p>以下 PDF 为未发布草稿。创建成功后，可在该赛事的资料打印中心导出正式版本。</p></div><div className="creation-review"><div><small>赛事</small><b>{draft.name}</b><span>{draft.startsAt.replace('T',' ')} 至 {draft.endsAt.replace('T',' ')}</span><span>{draft.venue}</span></div><div><small>棋盘与裁判</small><b>{schedule.counts.gomoku+schedule.counts.junqi} 桌 / {Object.values(schedule.bindings).filter(keys=>keys.length).length} 名裁判</b><span>五子棋 {schedule.counts.gomoku} 桌 · 军棋 {schedule.counts.junqi} 桌</span><span>每桌均已安排负责裁判</span></div></div><ReportActions build={()=>refereeReport(validateEvent(draft),schedule,people,'创建草稿',true)}/></>}
  <BackupFields value={backupSettings(draft)} onChange={autoBackup=>setDraft({...draft,autoBackup})}/>
+ <fieldset className="backup-fields"><legend>场间休息</legend><label>选手休息时间（分钟）<input aria-label="创建选手休息分钟" type="number" min={0} max={120} step={1} value={restMinutes(draft)} onChange={e=>setDraft({...draft,restMinutes:e.target.value===''?NaN:Number(e.target.value)})}/></label><small>默认 3 分钟，0 表示不设间隔。兼项共用同一休息限制；赛中可在“现场运行”修改。</small></fieldset>
  {!creating&&<p className="info-note">更新基本信息后，各设备同步展示，保留当前赛程与成绩。</p>}
  </>}
  </div>

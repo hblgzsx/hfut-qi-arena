@@ -211,7 +211,7 @@ Deno.serve(async req=>{
       const next=validateState(scheduleAction(state,body.command));
       next.revision=crypto.randomUUID();
       const auditSport:Sport=body.command?.sport==='junqi'?'junqi':'gomoku';
-      next.audit=[{id:crypto.randomUUID(),time:new Date().toISOString(),sport:auditSport,message:'现场调度 '+body.command?.type+' · '+profile.display_name+' · '+String(body.reason??'确认开赛').slice(0,200)},...state.audit].slice(0,200);
+      next.audit=[{id:crypto.randomUUID(),time:new Date().toISOString(),sport:auditSport,message:(body.command?.type==='rest'?'休息时间 '+(state.event?.restMinutes??3)+' → '+body.command.minutes+' 分钟':'现场调度 '+body.command?.type)+' · '+profile.display_name+' · '+String(body.reason??'确认开赛').slice(0,200)},...state.audit].slice(0,200);
       const {data,error}=await db.rpc('arena_commit',{p_id:eventId,p_revision:state.revision,p_state:next,p_public:redactState(next,'public'),p_actor:user.id});
       if(error) throw error;
       if(!data) return reply({error:'调度提交冲突，请刷新后重试'},409);

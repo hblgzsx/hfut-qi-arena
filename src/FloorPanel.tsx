@@ -11,6 +11,7 @@ import {DataTable} from './DataTable';
 import {DrawStudio} from './DrawStudio';
 import {TableMatchDialog} from './TableMatchDialog';
 import {validateNewEventPassword} from './event-password';
+import {restMinutes,validateRestMinutes} from './event-settings';
 
 export function FloorBoard({state,onRecord,onBegin,onCancel,userId}:{state:State;onRecord?:(sport:Sport,id:string)=>void;onBegin?:(assignment:string)=>Promise<void>;onCancel?:(assignment:string)=>void;userId?:string}) {
   const s=state.schedule??emptySchedule();
@@ -24,7 +25,7 @@ export function FloorBoard({state,onRecord,onBegin,onCancel,userId}:{state:State
       const names=a?.players.map(id=>state.tournaments[sport].players.find(p=>p.id===id)?.name??'待确认选手');
       const status=a?(a.status==='playing'?'进行中':'已叫号 · 等待开赛'):'空闲 · 等待可上场对局';
       const interactive=!!a&&mayOperate(key)&&!!(onBegin||onRecord||onCancel);
-      const note=a?a.match+(interactive?(a.status==='called'?' · 点击确认开赛':' · 点击录入成绩'):''):'选手需休息满 3 分钟，兼项不冲突';
+      const note=a?a.match+(interactive?(a.status==='called'?' · 点击确认开赛':' · 点击录入成绩'):''):'场间休息 '+restMinutes(state.event)+' 分钟，兼项不冲突';
       return <button className={'floor-card '+(a?'occupied':'idle')} key={key} disabled={!interactive} aria-label={tableName(sport,table)+(a?' · '+a.match+' · '+status:' · 空闲')} title={[tableName(sport,table),status,names?.join(' / '),note].filter(Boolean).join(' · ')} onClick={()=>a&&setSelected(a.id)}>
         <div className="floor-card-body"><b className="floor-card-table">{tableName(sport,table)}</b><span className="floor-card-status">{status}</span>
         <strong className="floor-card-duel">{names?<><span title={names[0]}>{names[0]}</span><i>VS</i><span title={names[1]}>{names[1]}</span></>:<span>等待对局</span>}</strong><small className="floor-card-note" title={note}>{note}</small></div>
@@ -43,6 +44,9 @@ export function FloorPanel({state,call,onChanged,owner='local'}:{state:State;cal
   const [pending,setPending]=useState<{command:Record<string,unknown>;revision:string}|null>(null),[verificationError,setVerificationError]=useState('');
   const [message,setMessage]=useState(''),[busy,setBusy]=useState(false);
   const [presentation,setPresentation]=useState<{state:State;sport:Sport}|null>(null);
+  const [restDraft,setRestDraft]=useState(()=>String(restMinutes(state.event))),[restDirty,setRestDirty]=useState(false),[restBase,setRestBase]=useState(()=>restMinutes(state.event));
+  const restConflict=restDirty&&restBase!==restMinutes(state.event);
+  useEffect(()=>{if(!restDirty){setRestDraft(String(restMinutes(state.event)));setRestBase(restMinutes(state.event));}},[state.event?.restMinutes,restDirty]);
   const [tab,setTab]=useState<'live'|'tables'|'draw'|'documents'|'security'>('live');
   const [dirty,setDirty]=useState(false);
   const [bindingBase,setBindingBase]=useState(()=>JSON.stringify([s.counts,s.bindings]));
@@ -54,7 +58,7 @@ export function FloorPanel({state,call,onChanged,owner='local'}:{state:State;cal
   useEffect(()=>{for(const sp of SPORTS)if(!queueDirty[sp]){const value=s.queues[sp].join('\n');setQueueDrafts(old=>({...old,[sp]:value}));setQueueBases(old=>({...old,[sp]:value}));}},[state.revision,queueDirty]);
   useEffect(()=>{if(!dirty){setCounts(s.counts);setBindings(s.bindings);setBindingBase(JSON.stringify([s.counts,s.bindings]));}},[state.revision,dirty]);
   function run(command:Record<string,unknown>){
-    try{if(command.type==='configure')validateTableBindings({...s,counts,bindings});if(command.type==='draw'&&state.tournaments[command.sport as Sport].players.filter(p=>!(command.absent as string[]).includes(p.id)).length<2)throw new Error('至少需要 2 名到场选手才能抽签。');}catch(e){setMessage((e as Error).message);return;}
+    try{if(command.type==='rest')validateRestMinutes(command.minutes);if(command.type==='configure')validateTableBindings({...s,counts,bindings});if(command.type==='draw'&&state.tournaments[command.sport as Sport].players.filter(p=>!(command.absent as string[]).includes(p.id)).length<2)throw new Error('至少需要 2 名到场选手才能抽签。');}catch(e){setMessage((e as Error).message);return;}
     if(command.type==='begin'){void execute(command,state.revision);return;}
     setPending({command:structuredClone(command),revision:state.revision});setPassword('');setReason('');setVerificationError('');
   }
@@ -64,6 +68,7 @@ export function FloorPanel({state,call,onChanged,owner='local'}:{state:State;cal
       const response=await call('schedule',{command,password,reason,expectedRevision:revision});
       if(command.type==='draw'&&response?.state)setPresentation({state:response.state,sport:command.sport as Sport});
       if(command.type==='configure')setDirty(false);
+      if(command.type==='rest')setRestDirty(false);
       if(command.type==='reorder'||command.type==='draw')setQueueDirty(old=>({...old,[command.sport as Sport]:false}));
       setPassword('');setReason('');setPending(null);onChanged();setMessage('现场调度已保存。');
     } catch(e) {if(pending)setVerificationError((e as Error).message);else setMessage((e as Error).message);}
@@ -91,7 +96,8 @@ export function FloorPanel({state,call,onChanged,owner='local'}:{state:State;cal
     <div className="sport-tabs">{SPORTS.map(sp=><button key={sp} onClick={()=>setSport(sp)} className={sport===sp?'selected':''}>{SPORT_NAMES[sp]}</button>)}</div>
     </>}
     <div hidden={tab!=='draw'}><CheckinDesk key={sport+':'+state.tournaments[sport].drawnAt+':'+state.tournaments[sport].players.map(p=>p.id).join(',')} state={state} sport={sport} owner={owner} eventKey={eventId} busy={busy} onDraw={(absent,priority)=>run({type:'draw',sport,absent,priority})} onPresent={()=>setPresentation({state,sport})}/></div>
-    {tab==='live'&&<section className="operations-section"><p>一桌完赛即补台，允许已确定双方的后续轮次提前开赛，选手休息 3 分钟；兼项不重复占桌。</p>
+    {tab==='live'&&<section className="operations-section"><p>一桌完赛即补台，允许已确定双方的后续轮次提前开赛，选手休息 {restMinutes(state.event)} 分钟；兼项不重复占桌。</p>
+    <fieldset className="backup-fields rest-settings"><legend>选手休息时间 · 可中途修改</legend><p>当前生效：{restMinutes(state.event)} 分钟。新设置从选手上一场结束时间计算，只影响尚未叫号的对局，已叫号或开赛的对局保留。</p><label>休息时间（分钟）<input aria-label="选手休息时间分钟" type="number" min={0} max={120} step={1} value={restDraft} disabled={busy} onChange={e=>{setRestDraft(e.target.value);setRestDirty(true);}}/></label><small>0 表示不设休息间隔，最多 120 分钟。两项目按学号共同检查；语音播报结束后 15 秒的叫号间隔单独执行。</small>{restConflict&&<p className="wizard-error">另一位管理员已修改休息时间，请先载入最新设置。<button type="button" className="text-button" onClick={()=>setRestDirty(false)}>载入最新休息设置</button></p>}<button type="button" className="button secondary small" disabled={busy||!restDirty||restConflict||restDraft===''} onClick={()=>run({type:'rest',minutes:Number(restDraft)})}>保存休息时间</button></fieldset>
     <h3>已锁定候场顺序</h3><p>修改顺序需要重新输入赛事密码和原因。已叫号对局保持原桌。</p>
     <details><summary>调整候场顺序（需赛事密码）</summary><textarea aria-label="候场场次顺序" value={queue} onChange={e=>setQueue(e.target.value)} rows={5}/>
     {queueConflict&&<p role="alert" className="wizard-error">候场顺序已被其他管理员修改，请重新加载后编辑。<button className="text-button" onClick={()=>setQueueDirty(old=>({...old,[sport]:false}))}>重新载入顺序</button></p>}
@@ -106,7 +112,8 @@ export function FloorPanel({state,call,onChanged,owner='local'}:{state:State;cal
     <p role="status">{message}</p>
     {presentation&&<DrawStudio state={state} initialState={presentation.state} sport={presentation.sport} onClose={()=>setPresentation(null)}/>}
     {pending&&<div className="verification-overlay"><form className="verification-dialog" role="dialog" aria-modal="true" aria-label="确认现场修改" onSubmit={e=>{e.preventDefault();if(!password){setVerificationError('请输入当前赛事密码。');return;}if(reason.trim().length<2){setVerificationError('请填写至少 2 字的操作原因。');return;}void execute(pending.command,pending.revision);}} onKeyDown={e=>{if(e.key==='Escape'&&!busy){setPending(null);setPassword('');}}}>
-      <header><div><span className="eyebrow">CONFIRM CHANGE</span><h3>确认现场修改</h3></div><button type="button" className="icon-button" aria-label="取消现场修改" disabled={busy} onClick={()=>{setPending(null);setPassword('');}}><X size={20}/></button></header><p>{state.event?.name}</p><strong>{({configure:'保存棋盘与裁判绑定',draw:'按到场名单抽签并锁定',reorder:'修改候场顺序',start:'启动自动叫号',pause:'暂停自动补台',cancel:'取消叫号并暂停调度'} as Record<string,string>)[String(pending.command.type)]??'修改现场调度'}</strong>
+      <header><div><span className="eyebrow">CONFIRM CHANGE</span><h3>确认现场修改</h3></div><button type="button" className="icon-button" aria-label="取消现场修改" disabled={busy} onClick={()=>{setPending(null);setPassword('');}}><X size={20}/></button></header><p>{state.event?.name}</p><strong>{({configure:'保存棋盘与裁判绑定',draw:'按到场名单抽签并锁定',reorder:'修改候场顺序',rest:'修改选手休息时间',start:'启动自动叫号',pause:'暂停自动补台',cancel:'取消叫号并暂停调度'} as Record<string,string>)[String(pending.command.type)]??'修改现场调度'}</strong>
+      {pending.command.type==='rest'&&<p>从 {restMinutes(state.event)} 分钟改为 {String(pending.command.minutes)} 分钟。仅按新间隔计算尚未叫号的场次，已叫号和进行中对局不撤回。</p>}
       {pending.command.type==='draw'&&<DrawReview state={state} command={pending.command}/>}
       <label>当前赛事密码<input autoFocus type="password" autoComplete="off" value={password} onChange={e=>setPassword(e.target.value)}/></label><label>本次修改原因<input maxLength={200} value={reason} onChange={e=>setReason(e.target.value)} placeholder="说明为什么需要这次修改"/></label>
       {pending.revision!==state.revision&&<p className="wizard-error">赛事数据已更新，请取消并核对最新赛况后重新提交。</p>}{verificationError&&<p role="alert" className="wizard-error">{verificationError}</p>}<footer><button type="button" className="button secondary" disabled={busy} onClick={()=>{setPending(null);setPassword('');}}>取消</button><button className="button primary" disabled={busy||pending.revision!==state.revision} type="submit">{busy?'正在验证保存…':'验证并保存修改'}</button></footer>

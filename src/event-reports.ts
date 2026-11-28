@@ -4,11 +4,11 @@ import type {EventSettings} from './event-settings.ts';
 import {defaultEvent,eventTime} from './event-settings.ts';
 import {SPORTS,emptySchedule,occupied,tableKey,tableName,validateTableBindings} from './scheduling.ts';
 import type {Schedule} from './scheduling.ts';
-export type ReportKind='referees'|'schedule'|'results';
+export type ReportKind='referees'|'first-round'|'schedule'|'results';
 export interface ReportSection {title:string;columns:string[];rows:string[][];widths:number[];note?:string}
 export interface EventReport {title:string;event:EventSettings;generatedAt:string;revision:string;draft:boolean;summary:string;sections:ReportSection[];notes:string[]}
 export interface ReportMember {id:string;display_name:string}
-export const REPORT_TITLES:Record<ReportKind,string>={referees:'裁判与棋盘安排',schedule:'现场对阵与候场',results:'比赛成绩归档'};
+export const REPORT_TITLES:Record<ReportKind,string>={referees:'裁判与棋盘安排','first-round':'第一轮参赛顺序',schedule:'现场对阵与候场',results:'比赛成绩归档'};
 export function refereeReport(event:EventSettings,s:Schedule,members:ReportMember[],revision='创建草稿',draft=false):EventReport{
  validateTableBindings(s);
  const get=(key:string)=>Object.entries(s.bindings).filter(([,keys])=>keys.length===1&&keys[0]===key).map(([id])=>{const p=members.find(p=>p.id===id);if(!p)throw new Error('有裁判资料未加载或账号已停用，请刷新裁判列表后导出。');return p.display_name;}).join('、');
@@ -17,6 +17,20 @@ export function refereeReport(event:EventSettings,s:Schedule,members:ReportMembe
 export function eventReport(state:State,kind:ReportKind,members:ReportMember[]=[]):EventReport{
  const event=state.event??defaultEvent(),s=state.schedule??emptySchedule();
  if(kind==='referees')return refereeReport(event,s,members,state.revision);
+ if(kind==='first-round'){
+  const drawn=SPORTS.filter(sp=>state.tournaments[sp].seeds.length);
+  if(!drawn.length)throw new Error('尚未生成抽签，请先完成检录与抽签锁定，再导出第一轮参赛顺序。');
+  const report:EventReport={title:REPORT_TITLES[kind],event,generatedAt:new Date().toISOString(),revision:state.revision,draft:false,summary:'首轮固定对阵 / 已锁定叫号顺序 / 动态分配棋盘',sections:[],notes:['本表按导出时已保存的首轮队列生成。候场顺序不是固定开赛时间，棋盘号以现场实际叫号为准。','首轮轮空单独列出，不占用棋盘，不安排虚构对手；优先设置不改变随机对手和轮空。','已完成对局仍保留在本次首轮顺序中，不能把旧比赛结果当作下一场叫号。','空桌即补台，兼项冲突和至少 3 分钟休息可能使实际叫号顺序顺延。','若名单、抽签或候场顺序修改，须重新导出并明确撤回旧版。未完成抽签的项目不会生成虚构顺序。']};
+  for(const sp of SPORTS){const t=state.tournaments[sp],first=buildBracket(t)[0]??[],name=(id:string|null)=>t.players.find(p=>p.id===id)?.name??'待定';
+   if(!first.length){report.sections.push({title:SPORT_NAMES[sp]+' · 尚未抽签',columns:['项目','说明'],widths:[.25,.75],rows:[[SPORT_NAMES[sp],'请完成本项目检录与抽签锁定，再重新导出。']]});continue;}
+   if(s.draws[sp]!==t.drawnAt)throw new Error(SPORT_NAMES[sp]+'签位尚未接入现场队列，请在“检录与抽签”核对并锁定后导出。');
+   const games=first.filter(m=>m.a.id&&m.b.id),ordered=s.queues[sp].map(id=>games.find(m=>m.id===id)).filter((m):m is NonNullable<typeof m>=>!!m);
+   if(ordered.length!==games.length||new Set(ordered.map(m=>m.id)).size!==games.length)throw new Error(SPORT_NAMES[sp]+'首轮候场顺序不完整，请核查已保存队列后导出。');
+   report.sections.push({title:SPORT_NAMES[sp]+' · 第一轮实赛顺序',columns:['候场序 / 场次','选手 A / 选手 B','赛制 / 棋盘 / 状态'],widths:[.22,.43,.35],rows:ordered.map((m,i)=>{const a=s.assignments.find(a=>a.sport===sp&&a.match===m.id&&a.status!=='cancelled');return [(i+1)+' / '+m.id,name(m.a.id)+' / '+name(m.b.id),'BO'+m.bestOf+' / '+(a?tableName(sp,a.table):'待现场叫号')+' / '+(m.resolved?'已结束':a?.status==='playing'?'进行中':a?.status==='called'?'已叫号':'候场')];})});
+   report.sections.push({title:SPORT_NAMES[sp]+' · 第一轮轮空',columns:['场次','轮空选手','安排'],widths:[.22,.43,.35],rows:first.filter(m=>m.bye).map(m=>[m.id,name(m.a.id??m.b.id),'首轮自动晋级，不占棋盘'])});
+  }
+  return report;
+ }
  const report:EventReport={title:REPORT_TITLES[kind],event,generatedAt:new Date().toISOString(),revision:state.revision,draft:false,summary:kind==='schedule'?'现场快照 / 固定签位 / 动态补台':'阶段性成绩 / 以本次导出时已确认赛果为准',sections:[],notes:kind==='schedule'?['候场次序不等于固定桌号。空桌补台时才分配棋盘，实际桌号以现场叫号为准。','已确定双方的后续轮次可提前开始，但选手须休息满 3 分钟且无兼项冲突。','“轮空”与“等待晋级”按签位实际状态展示，不视为已完成实赛。']:['仅记录导出时已确认的成绩；未完成的比赛保留待定，不补造名次。','本 PDF 用于查阅、打印与归档。系统数据恢复请使用 JSON 备份。']};
  for(const sp of SPORTS){
   const t=state.tournaments[sp],matches=buildBracket(t).flat(),name=(id:string|null,fallback='待定')=>t.players.find(p=>p.id===id)?.name??fallback;

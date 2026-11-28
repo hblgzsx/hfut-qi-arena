@@ -12,14 +12,16 @@ export function FloorBoard({state,onRecord,userId}:{state:State;onRecord?:(sport
   const s=state.schedule??emptySchedule();
   return <div className="floor-grid">{SPORTS.map(sport=><section key={sport}>
     <h2>{SPORT_NAMES[sport]} <small>{s.counts[sport]} 张棋盘</small></h2>
-    <div className="floor-tables">{Array.from({length:s.counts[sport]},(_,i)=>{
+    <div className="floor-tables" style={{gridTemplateRows:`repeat(${Math.ceil(s.counts[sport]/(sport==='gomoku'?2:1))},minmax(0,1fr))`}}>{Array.from({length:s.counts[sport]},(_,i)=>{
       const table=i+1,key=tableKey(sport,table);
       if(userId&&!s.bindings[userId]?.includes(key))return null;
       const a=s.assignments.find(a=>a.sport===sport&&a.table===table&&occupied(a));
-      const names=a?.players.map(id=>state.tournaments[sport].players.find(p=>p.id===id)?.name).join(' / ');
-      return <button key={key} disabled={!a||!onRecord} onClick={()=>a&&onRecord?.(sport,a.match)}>
-        <b>{tableName(sport,table)}</b><span>{a?(a.status==='playing'?'进行中':'已叫号 · 等待开赛'):'空闲 · 等待可上场对局'}</span>
-        <strong>{names||'—'}</strong><small>{a?.match??'选手需休息满 3 分钟，兼项不冲突'}</small>
+      const names=a?.players.map(id=>state.tournaments[sport].players.find(p=>p.id===id)?.name??'待确认选手');
+      const status=a?(a.status==='playing'?'进行中':'已叫号 · 等待开赛'):'空闲 · 等待可上场对局';
+      const note=a?.match??'选手需休息满 3 分钟，兼项不冲突';
+      return <button className={'floor-card '+(a?'occupied':'idle')} key={key} disabled={!a||!onRecord} title={[tableName(sport,table),status,names?.join(' / '),note].filter(Boolean).join(' · ')} onClick={()=>a&&onRecord?.(sport,a.match)}>
+        <div className="floor-card-body"><b className="floor-card-table">{tableName(sport,table)}</b><span className="floor-card-status">{status}</span>
+        <strong className="floor-card-duel">{names?<><span title={names[0]}>{names[0]}</span><i>VS</i><span title={names[1]}>{names[1]}</span></>:<span>等待对局</span>}</strong><small className="floor-card-note" title={note}>{note}</small></div>
       </button>;
     })}</div>
     <p>候场 {s.queues[sport].filter(id=>buildBracket(state.tournaments[sport]).flat().some(m=>m.id===id&&m.ready&&!m.resolved)&&!s.assignments.some(a=>a.sport===sport&&a.match===id&&occupied(a))).length} 场</p>

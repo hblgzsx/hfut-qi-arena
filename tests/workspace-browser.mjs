@@ -48,6 +48,7 @@ try{
  assert.equal(await page.getByLabel('备份间隔（分钟）').inputValue(),'10');
  await pdf('下载裁判安排 PDF','裁判安排-未发布草稿.pdf');
  await page.getByRole('button',{name:'核对完成，创建竞赛'}).click();await page.getByRole('heading',{name:'确认创建新竞赛'}).waitFor();await page.getByRole('button',{name:'确认创建竞赛',exact:true}).click();await page.waitForURL('**?event=created-event');
+ assert.equal(await page.evaluate(()=>localStorage.getItem('qi-event-creation-draft-v1:admin')),null);
  assert.equal(Object.values(createdPayload.schedule.bindings).filter(a=>a.length).length,4);assert.equal(createdPayload.schedule.bindings.j1[0],'gomoku:1');assert.equal(createdPayload.schedule.bindings.j4[0],'gomoku:2');
  assert.equal(requests.find(r=>r.action==='create-event').password,'TEST-EVENT-ONLY');assert.equal(JSON.stringify(createdPayload).includes('TEST-EVENT-ONLY'),false);
  await page.goto('http://127.0.0.1:4291/?event=event-one');await page.getByRole('button',{name:'现场调度',exact:true}).click();await page.getByRole('heading',{name:'现场资料验证赛事',exact:true}).waitFor();

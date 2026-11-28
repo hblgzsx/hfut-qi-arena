@@ -14,13 +14,16 @@ import {ReportActions} from './ReportActions';
 import {refereeReport} from './event-reports';
 import {Check,ArrowLeft,ArrowRight} from 'lucide-react';
 import {validateNewEventPassword} from './event-password';
+import {loadCreationDraft,saveCreationDraft} from './event-creation-draft';
 export type NewEventRules=Record<'gomoku'|'junqi',TournamentRules>;
-export function EventForm({initial,creating,saving,onSave,members=[],call}:{initial:EventSettings;creating:boolean;saving:boolean;members?:RefereeOption[];call?:ArenaCall;onSave:(value:EventSettings,rules:NewEventRules,schedule:Schedule,password:string)=>Promise<void>}){
- const [draft,setDraft]=useState(()=>({...structuredClone(initial),autoBackup:creating?{enabled:false,intervalMinutes:10}:backupSettings(initial)})),[custom,setCustom]=useState(''),[error,setError]=useState('');
- const [rules,setRules]=useState<NewEventRules>(()=>({gomoku:defaultRules(),junqi:defaultRules()}));
- const [schedule,setSchedule]=useState(emptySchedule);
- const [password,setPassword]=useState(''),[confirmation,setConfirmation]=useState('');
- const [step,setStep]=useState(0),[ruleSport,setRuleSport]=useState<'gomoku'|'junqi'>('gomoku'),[created,setCreated]=useState<RefereeOption[]>([]);
+export function EventForm({initial,creating,saving,onSave,members=[],call,draftOwner='local'}:{initial:EventSettings;creating:boolean;saving:boolean;members?:RefereeOption[];call?:ArenaCall;draftOwner?:string;onSave:(value:EventSettings,rules:NewEventRules,schedule:Schedule,password:string)=>Promise<void>}){
+ const [restored]=useState(()=>creating?loadCreationDraft(draftOwner,localStorage):null);
+ const [draft,setDraft]=useState(()=>restored?.draft??({...structuredClone(initial),autoBackup:creating?{enabled:false,intervalMinutes:10}:backupSettings(initial)})),[custom,setCustom]=useState(restored?.custom??''),[error,setError]=useState('');
+ const [rules,setRules]=useState<NewEventRules>(()=>restored?.rules??({gomoku:defaultRules(),junqi:defaultRules()}));
+ const [schedule,setSchedule]=useState(()=>restored?.schedule??emptySchedule());
+ const [password,setPassword]=useState(restored?.password??''),[confirmation,setConfirmation]=useState(restored?.confirmation??'');
+ const [step,setStep]=useState(restored?.step??0),[ruleSport,setRuleSport]=useState<'gomoku'|'junqi'>(restored?.ruleSport??'gomoku'),[created,setCreated]=useState<RefereeOption[]>(restored?.created??[]),[draftSaved,setDraftSaved]=useState(true);
+ useEffect(()=>{if(creating)setDraftSaved(saveCreationDraft(draftOwner,{draft,custom,rules,schedule,password,confirmation,step,ruleSport,created},localStorage));},[creating,draftOwner,draft,custom,rules,schedule,password,confirmation,step,ruleSport,created]);
  const people=[...new Map([...members,...created].map(p=>[p.id,p])).values()];
  const steps=['赛事信息','赛制与奖项','棋盘与裁判','核对与创建'];
  useEffect(()=>{setError('');},[schedule,draft,rules,password,confirmation]);
@@ -28,6 +31,7 @@ export function EventForm({initial,creating,saving,onSave,members=[],call}:{init
  const colleges=[...new Set([...COLLEGES,...draft.colleges])];
  return <form className={'event-form '+(creating?'event-wizard':'')} onSubmit={async e=>{e.preventDefault();if(creating&&step<3){advance();return;}setError('');try{if(creating){validateTableBindings(schedule);validateNewEventPassword(password,confirmation);}await onSave(validateEvent(draft),{gomoku:validateRules(rules.gomoku),junqi:validateRules(rules.junqi)},schedule,creating?password:'');}catch(err){setError((err as Error).message);}}}>
  {creating&&<nav className="wizard-steps" aria-label="创建竞赛步骤">{steps.map((label,i)=><button type="button" key={label} disabled={i>step} aria-current={step===i?'step':undefined} onClick={()=>{setStep(i);setError('');}}><span>{i<step?<Check size={15}/>:i+1}</span><b>{label}</b></button>)}</nav>}
+ {creating&&<p className="composer-hint" role="status">{draftSaved?(restored?'已恢复上次创建草稿。':'创建信息自动保存为本机草稿。')+' 暂时关闭或刷新后可继续；刷新后需重新填写赛事密码。':'浏览器未能保存草稿，暂时关闭可继续，请勿刷新页面。'}</p>}
  <div className="wizard-stage">
  {(!creating||step===0)&&<>
  {creating&&<div className="wizard-stage-title"><span className="eyebrow">01 / EVENT DETAILS</span><h3>先为这场比赛，定好时间与地点。</h3><p>名单在创建后导入，所有赛程与裁判安排独立保存。</p></div>}
@@ -41,7 +45,7 @@ export function EventForm({initial,creating,saving,onSave,members=[],call}:{init
  {creating&&step===2&&<TableBindingFields value={schedule} onChange={setSchedule} members={people} call={call} onMemberCreated={p=>setCreated(old=>[...old,p])}/>}
  {(!creating||step===3)&&<>
  {creating&&<><div className="wizard-stage-title"><span className="eyebrow">04 / READY TO LAUNCH</span><h3>核对安排，准备开启比赛。</h3><p>以下 PDF 为未发布草稿。创建成功后，可在该赛事的资料打印中心导出正式版本。</p></div><div className="creation-review"><div><small>赛事</small><b>{draft.name}</b><span>{draft.startsAt.replace('T',' ')} 至 {draft.endsAt.replace('T',' ')}</span><span>{draft.venue}</span></div><div><small>棋盘与裁判</small><b>{schedule.counts.gomoku+schedule.counts.junqi} 桌 / {Object.values(schedule.bindings).filter(keys=>keys.length).length} 名裁判</b><span>五子棋 {schedule.counts.gomoku} 桌 · 军棋 {schedule.counts.junqi} 桌</span><span>每桌均已安排负责裁判</span></div></div><ReportActions build={()=>refereeReport(validateEvent(draft),schedule,people,'创建草稿',true)}/></>}
- <BackupFields value={draft.autoBackup} onChange={autoBackup=>setDraft({...draft,autoBackup})}/>
+ <BackupFields value={backupSettings(draft)} onChange={autoBackup=>setDraft({...draft,autoBackup})}/>
  {!creating&&<p className="info-note">更新基本信息后，各设备同步展示，保留当前赛程与成绩。</p>}
  </>}
  </div>

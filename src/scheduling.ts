@@ -1,5 +1,5 @@
 import { buildBracket, draw, seededRandom, SPORT_NAMES } from './engine.ts';
-import type { Sport, State } from './engine.ts';
+import type { Match, Sport, State, Tournament } from './engine.ts';
 import {restMinutes} from './event-settings.ts';
 
 export const SPORTS: Sport[] = ['gomoku', 'junqi'];
@@ -30,6 +30,7 @@ export interface Schedule {
 }
 export const tableKey = (sport: Sport, table: number) => sport + ':' + table;
 export const tableName = (sport: Sport, table: number) => SPORT_NAMES[sport] + ' ' + table + ' 号桌';
+export function tableCallText(t:Tournament,table:number,match:Match){const name=(id:string|null)=>t.players.find(p=>p.id===id)?.name??'待定选手';return tableName(t.sport,table)+'，下一场，'+match.label.replace('1/4 决赛','四分之一决赛')+'，'+name(match.a.id)+'对'+name(match.b.id)+'。本场采用'+(match.bestOf===1?'一局定胜负':'三局两胜')+'。请两位选手前往'+tableName(t.sport,table)+'准备比赛。';}
 export const occupied = (a: TableAssignment) => a.status === 'called' || a.status === 'playing';
 export function validateTableBindings(s:Schedule,requireAll=true) {
   if(SPORTS.some(sport=>!Number.isInteger(s.counts[sport])||s.counts[sport]<1||s.counts[sport]>30))throw new Error('每个项目的棋盘数量必须是 1—30 的整数。');
@@ -122,9 +123,7 @@ export function dispatchTables(input: State, now = Date.now()): State {
         players: [match.a.id!, match.b.id!], status: 'called', calledAt: now };
       s.assignments.push(a);
       a.players.forEach(id => busy.add(identity(state, sport, id)));
-      const names = a.players.map(id => t.players.find(p => p.id === id)!.name);
-      const text = tableName(sport, table) + '，下一场，' + match.label.replace('1/4 决赛', '四分之一决赛') +
-        '，' + names[0] + '对' + names[1] + '。请两位选手前往' + tableName(sport, table) + '准备比赛。';
+      const text = tableCallText(t,table,match);
       s.calls.push({ id: crypto.randomUUID(), assignment: a.id, text, createdAt: now });
     }
   }

@@ -1,56 +1,56 @@
 import {finishResultVoice} from './broadcast-order';
 import {eventId} from './cloud';
-import { useEffect, useState } from 'react';
-import { Volume2, VolumeX, X } from 'lucide-react';
-import { announcementText } from './announcement-text';
-import type { SpokenResult } from './announcement-text';
-import { chooseVoice, isNaturalVoice, voiceGender, voiceLabel } from './voice-policy';
-import type { VoiceGender } from './voice-policy';
+import {useEffect,useState} from 'react';
+import {Volume2,VolumeX,X} from 'lucide-react';
+import {announcementText} from './announcement-text';
+import type {SpokenResult} from './announcement-text';
+import {chooseVoice,isNaturalVoice,voiceGender,voiceLabel} from './voice-policy';
+import type {VoiceGender} from './voice-policy';
+import {playSpeechChunks} from './speech-playback';
+import {claimBroadcast,OtherBroadcastDevice,withBroadcastHeartbeat} from './broadcast-lease';
+import {resultDeliveryId,resultWasDelivered,markResultDelivered} from './result-delivery';
 type Preferences={enabled:boolean;voice:string;style:'standard'|'energetic'|'calm';duration:number;gender:VoiceGender};
 const KEY='qi-arena-speech-v1';
 const styles={standard:{label:'标准赛事解说',rate:1,pitch:1},energetic:{label:'热烈竞技',rate:1.04,pitch:1},calm:{label:'沉稳播音',rate:.94,pitch:1}};
 function readPreferences():Preferences{try{const v=JSON.parse(localStorage.getItem(KEY)||'{}');return {enabled:v.enabled===true,voice:typeof v.voice==='string'&&!/kangkang|yunxi|yunjian/i.test(v.voice)?v.voice:'',gender:'female',style:v.style in styles?v.style:'standard',duration:[8,12,16,20,30].includes(v.duration)?v.duration:12};}catch{return {enabled:false,voice:'',style:'standard',duration:12,gender:'female'};}}
 export function setResultSpeechEnabled(enabled:boolean){try{localStorage.setItem(KEY,JSON.stringify({...readPreferences(),enabled}));window.dispatchEvent(new Event('qi-speech-preferences'));}catch{}}
-let currentUtterance:SpeechSynthesisUtterance|null=null;
-function speak(text:string,p:Preferences,onDone:(ok:boolean)=>void){
-  const u=new SpeechSynthesisUtterance(text);currentUtterance=u;const voices=speechSynthesis.getVoices();
-  const voice=chooseVoice(voices,p.gender,p.voice);if(p.gender!=='auto'&&!voice)throw new Error('当前设备缺少所选性别的中文音色，请安装语音包或更换浏览器。');u.voice=voice||null;u.lang=u.voice?.lang||'zh-CN';u.rate=styles[p.style].rate;u.pitch=styles[p.style].pitch;let finished=false;const finish=(ok:boolean)=>{if(finished)return;finished=true;u.onend=null;u.onerror=null;speechSynthesis.cancel();if(currentUtterance===u)currentUtterance=null;onDone(ok);};u.onend=()=>finish(true);u.onerror=()=>finish(false);speechSynthesis.cancel();speechSynthesis.speak(u);return u;
-}
-// Caller must own the shared voice lock for the lifetime of this promise.
-export function playManualSpeech(text:string,signal:AbortSignal){return new Promise<void>((resolve,reject)=>{
- let u:SpeechSynthesisUtterance|undefined,finished=false;
- const finish=(error?:Error)=>{if(finished)return;finished=true;clearTimeout(timer);signal.removeEventListener('abort',abort);if(u){u.onend=null;u.onerror=null;if(currentUtterance===u){currentUtterance=null;speechSynthesis.cancel();}}error?reject(error):resolve();};
- const abort=()=>finish(new Error('已停止本次播报'));
- const timer=setTimeout(()=>finish(new Error('语音播放超时，请检查音色后重试')),90000);
- if(signal.aborted){abort();return;}signal.addEventListener('abort',abort,{once:true});
- try{u=speak(text,readPreferences(),ok=>finish(ok?undefined:new Error('语音播放失败，请检查音色后重试')));}catch(e){finish(e as Error);}
- });}
+export async function playManualSpeech(text:string,signal:AbortSignal){const p=readPreferences(),voice=chooseVoice(speechSynthesis.getVoices(),p.gender,p.voice);if(!voice)throw new Error('设备暂无可用中文女声音色，请稍后重试或选择本机中文音色');await playSpeechChunks(text,{voice,rate:styles[p.style].rate,pitch:styles[p.style].pitch},signal);}
 export function broadcastSeconds(event:SpokenResult){const p=readPreferences();return p.enabled?Math.max(p.duration,Math.ceil(announcementText(event).length/(4*styles[p.style].rate))+3):p.duration;}
-const spokenInPage=new Set<string>();
 export function useAnnouncementSpeech(event:SpokenResult&{key:string;drawnAt?:string},enabled=true){
-  const [speaking,setSpeaking]=useState(false);
-  useEffect(()=>{const p=readPreferences();if(!enabled)return;if(!p.enabled||!('speechSynthesis' in window)){finishResultVoice(eventId,event.key);return;}
-    setSpeaking(true);let completed=false;const finishOrder=(actual=false)=>{if(completed)return;completed=true;finishResultVoice(eventId,event.key,actual);};
-    let active=true,started=false,release:(()=>void)|undefined,finishTimer:ReturnType<typeof setTimeout>,watchdog:ReturnType<typeof setTimeout>;
-    const identity=JSON.stringify([event.sport,event.drawnAt||'',event.match.id]),marker='qi-arena-spoken-match-v4:'+identity;
-    const play=()=>new Promise<void>(resolve=>{
-      release=resolve;if(!active){resolve();return;}
-      // Shared across control windows and displays; a reload cannot repeat the same result.
-      if(spokenInPage.has(identity)){finishOrder();setSpeaking(false);resolve();return;}
-      try{if(localStorage.getItem(marker)){finishOrder();setSpeaking(false);resolve();return;}localStorage.setItem(marker,String(Date.now()));}catch{}
-      spokenInPage.add(identity);
-      const transcript=announcementText(event),transcriptMarker='qi-arena-last-spoken-text-v1';
-      try{const last=JSON.parse(localStorage.getItem(transcriptMarker)||'null');if(last?.text===transcript&&Date.now()-last.time<120000){finishOrder();setSpeaking(false);resolve();return;}localStorage.setItem(transcriptMarker,JSON.stringify({text:transcript,time:Date.now()}));}catch{}
-      started=true;setSpeaking(true);const done=()=>{finishOrder(true);clearTimeout(watchdog);if(active)finishTimer=setTimeout(()=>{if(active)setSpeaking(false);resolve();},1200);else resolve();};
-      try{speak(transcript,p,done);watchdog=setTimeout(()=>{if(active){speechSynthesis.cancel();done();}},90000);}catch{done();}
-    });
-    const start=setTimeout(()=>{if(!active)return;
-      if(navigator.locks)void navigator.locks.request('qi-arena-voice-owner',async lock=>{if(lock&&active)await play();});
-      else void play();
-    },100);
-    return()=>{active=false;clearTimeout(start);clearTimeout(finishTimer);clearTimeout(watchdog);if(started&&!completed)speechSynthesis.cancel();finishOrder();release?.();};
-  },[event.key,enabled]);
-  return speaking;
+ const [busy,setBusy]=useState(enabled),[error,setError]=useState(''),[attempt,setAttempt]=useState(0);
+ useEffect(()=>{
+  if(!enabled){setBusy(false);setError('');return;}
+  const controller=new AbortController();let active=true;setBusy(true);setError('');
+  const delay=()=>new Promise<void>(resolve=>{const done=()=>{clearTimeout(t);controller.signal.removeEventListener('abort',done);resolve();};const t=setTimeout(done,2000);controller.signal.addEventListener('abort',done,{once:true});});
+  const id=resultDeliveryId(event);
+  const finish=(spoken=false)=>{if(!active)return;finishResultVoice(eventId,event.key,spoken);setBusy(false);setError('');};
+  async function run(){
+   if(!navigator.locks){setError('浏览器缺少播报锁，请使用 Edge 或 Chrome');return;}
+   while(active){
+    try{
+     let done=false;
+     await navigator.locks.request('qi-arena-voice-owner',{ifAvailable:true},async lock=>{
+      if(!lock||!active)return;
+      if(resultWasDelivered(eventId,id)){finish();done=true;return;}
+      const claim=await claimBroadcast('',false,controller.signal);if(!active)return;
+      if(claim.delivered.includes(id)){markResultDelivered(eventId,id);finish();done=true;return;}
+      if(!claim.owned)throw new OtherBroadcastDevice();
+      setError('');
+      await withBroadcastHeartbeat(controller.signal,signal=>playManualSpeech(announcementText(event),signal));
+      if(!active)return;
+      markResultDelivered(eventId,id);done=true;
+      try{await claimBroadcast(id,false,controller.signal);}catch{/* Persisted outbox retries without replaying completed audio. */}
+      finally{finish(true);}
+     });
+     if(done)return;
+    }catch(e){if(active)setError((e as Error).message+'；待播任务已保留，将自动重试');}
+    if(active)await delay();
+   }
+  }
+  void run();
+  return()=>{active=false;controller.abort();};
+ },[event.key,enabled,attempt]);
+ return {busy,error,retry:()=>setAttempt(n=>n+1)};
 }
 export function SpeechControls({queueSince=Date.now(),managed=false}:{queueSince?:number;managed?:boolean}){
   const [p,setP]=useState(readPreferences),[open,setOpen]=useState(false),[voices,setVoices]=useState<SpeechSynthesisVoice[]>([]),[status,setStatus]=useState('');

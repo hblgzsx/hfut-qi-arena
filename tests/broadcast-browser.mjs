@@ -1,48 +1,22 @@
-import { chromium } from 'playwright';
+import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
-import { demoState,buildBracket,setResult } from '../src/engine.ts';
-let state=demoState();
-const original=structuredClone(state),t=state.tournaments.gomoku,m=buildBracket(t).flat().find(m=>m.ready&&!m.resolved);
-const next=structuredClone(state);
-next.tournaments.gomoku=setResult(t,m.id,{kind:'played',games:m.bestOf===1?['A']:['A','A'],first:'A',reason:'',referee:'测试裁判',updatedAt:new Date().toISOString()});
-next.revision=crypto.randomUUID();
-const browser=await chromium.launch({channel:'msedge',headless:true});
-const context=await browser.newContext({viewport:{width:1366,height:768}});const page=await context.newPage();
-try {
- await context.addInitScript(()=>{
-  localStorage.setItem('qi-arena-speech-v1',JSON.stringify({enabled:true,voice:'',style:'standard',duration:8}));
-  window.__speeches=[];window.__popups=0;
-  window.SpeechSynthesisUtterance=class{constructor(text){this.text=text;}};
-  let timer;
-  Object.defineProperty(window,'speechSynthesis',{configurable:true,value:{getVoices:()=>[{name:'Microsoft Huihui',voiceURI:'huihui',lang:'zh-CN',localService:true}],addEventListener(){},removeEventListener(){},cancel(){clearTimeout(timer);},speak(u){window.__speeches.push(u.text);timer=setTimeout(()=>u.onend?.(),30000);}}});
-  document.addEventListener('DOMContentLoaded',()=>new MutationObserver(records=>{for(const r of records)for(const n of r.addedNodes)if(n instanceof Element){if(n.matches('.result-broadcast'))window.__popups++;window.__popups+=n.querySelectorAll('.result-broadcast').length;}}).observe(document.body,{childList:true,subtree:true}));
- });
- await context.route('https://nwvxamfgfbqbmamqfjcr.supabase.co/rest/v1/public_events*',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({state})}));
- await page.goto('http://127.0.0.1:4173/?screen=1&view=both');
- await page.locator('.arena-clock').getByText('云端已同步',{exact:true}).waitFor();
- const second=await context.newPage();await second.goto('http://127.0.0.1:4173/?screen=1&view=both');await second.locator('.arena-clock').getByText('云端已同步',{exact:true}).waitFor();
- const controller=await context.newPage();await controller.goto('http://127.0.0.1:4173/');await controller.locator('.local-badge').getByText('云端已同步',{exact:true}).waitFor();
- next.tournaments.gomoku.results[m.id].updatedAt=new Date().toISOString();state=next;await second.evaluate(()=>window.dispatchEvent(new Event('online')));await controller.evaluate(()=>window.dispatchEvent(new Event('online')));await page.evaluate(()=>window.dispatchEvent(new Event('online')));
- let popup=page.getByRole('dialog',{name:'赛果播报'});
- await popup.waitFor();await page.waitForTimeout(300);if(await second.evaluate(()=>window.__speeches.length))popup=second.getByRole('dialog',{name:'赛果播报'});
- assert.equal(await page.evaluate(()=>window.__speeches.length)+await second.evaluate(()=>window.__speeches.length),1);assert.equal(await controller.evaluate(()=>window.__speeches.length),0);
- // Same result arrives with changed non-result metadata, then stale and current snapshots.
- state=structuredClone(next);state.tournaments.gomoku.results[m.id].referee='';
- await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.waitForTimeout(300);
- state=original;await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.waitForTimeout(300);
- state=next;await page.evaluate(()=>window.dispatchEvent(new Event('online')));
- await page.waitForTimeout(23000);assert.equal(await popup.count(),1,'Long speech must remain in the SAME popup');
- assert.equal(await page.evaluate(()=>window.__speeches.length)+await second.evaluate(()=>window.__speeches.length),1);assert.equal(await controller.evaluate(()=>window.__speeches.length),0);
- await popup.waitFor({state:'detached',timeout:15000});
- await page.waitForTimeout(3000);
- assert.equal(await page.evaluate(()=>window.__popups),1,'Repeated snapshots must not reopen popup');
- assert.equal(await page.evaluate(()=>window.__speeches.length)+await second.evaluate(()=>window.__speeches.length),1);assert.equal(await controller.evaluate(()=>window.__speeches.length),0);
- assert.equal(await popup.count(),0);
- // A new server timestamp with the same actual score must not repeat speech.
- state=structuredClone(next);state.tournaments.gomoku.results[m.id].updatedAt='2030-01-01T00:00:00.000Z';state.revision=crypto.randomUUID();
- await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.waitForTimeout(2500);
- assert.equal(await page.evaluate(()=>window.__speeches.length)+await second.evaluate(()=>window.__speeches.length),1);
- await page.getByRole('button',{name:'关闭赛果播报'}).click();
- assert.equal(await page.getByRole('button',{name:'跳过后续演示播报'}).count(),0);
-  console.log('PASS: repeated/stale/metadata snapshots produce exactly one popup per display and one utterance across two screens; controller is silent; 30-second voice finishes inside that popup.');
-} finally {await browser.close();}
+import {demoState,buildBracket,setResult} from '../src/engine.ts';
+import {defaultEvent} from '../src/event-settings.ts';
+import {broadcastRows} from '../src/broadcast-data.ts';
+import {finishSpeechText} from './speech-fixture.mjs';
+let state=demoState();state.event=defaultEvent();const browser=await chromium.launch({channel:'msedge',headless:true}),contexts=[],pages=[],errors=[];let owner='',delivered=[];
+try{
+ for(let i=0;i<3;i++){
+  const context=await browser.newContext({viewport:{width:1366,height:900}}),page=await context.newPage();contexts.push(context);pages.push(page);page.on('pageerror',e=>errors.push(e.message));await page.clock.install();
+  await context.addInitScript(()=>{localStorage.setItem('sb-nwvxamfgfbqbmamqfjcr-auth-token',JSON.stringify({access_token:'fixture',refresh_token:'fixture',expires_at:Math.floor(Date.now()/1000)+3600,user:{id:'admin',last_sign_in_at:new Date().toISOString()}}));window.__utterance=null;window.__spoken=[];window.SpeechSynthesisUtterance=class{constructor(text){this.text=text;}};Object.defineProperty(window,'speechSynthesis',{configurable:true,value:{getVoices:()=>[{name:'Microsoft Huihui',voiceURI:'huihui',lang:'zh-CN',localService:true}],paused:false,resume(){},addEventListener(){},removeEventListener(){},cancel(){window.__utterance=null;},speak(u){window.__spoken.push(u.text);window.__utterance=u;}}});});
+  await context.route('**/auth/v1/**',r=>r.fulfill({json:{user:{id:'admin'}}}));await page.routeWebSocket('wss://**/*',ws=>ws.onMessage(()=>{}));await context.route('**/functions/v1/tournament',r=>{const b=r.request().postDataJSON();if(b.action==='events')return r.fulfill({json:{events:[{id:'multi',...state.event}]}});if(b.action==='voice-claim'){if(!owner&&!b.statusOnly)owner=b.owner;if(b.ack&&owner===b.owner)delivered=[...new Set([...delivered,b.ack])];return r.fulfill({json:{owned:!owner||owner===b.owner,delivered}});}return r.fulfill({json:{state,profile:{id:'admin',role:'superadmin',display_name:'多设备测试'}}});});
+  await page.goto('http://127.0.0.1:4291/?event=multi'+(i<2?'&screen=1':''));await page.getByText('云端已同步',{exact:true}).first().waitFor();
+ }
+ const t=state.tournaments.gomoku,m=buildBracket(t).flat().find(m=>m.ready&&!m.resolved);state=structuredClone(state);state.tournaments.gomoku=setResult(t,m.id,{kind:'played',games:m.bestOf===1?['A']:['A','A'],first:'A',reason:'',referee:'测试',updatedAt:new Date(await pages[0].evaluate(()=>Date.now())).toISOString()});state.revision=crypto.randomUUID();
+ for(const page of pages){await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.clock.runFor(2500);await page.waitForTimeout(100);}
+ for(let n=0;n<10;n++){for(const page of pages){await page.clock.runFor(500);await page.waitForTimeout(20);}if(await pages[0].evaluate(()=>!!window.__utterance)||await pages[1].evaluate(()=>!!window.__utterance))break;}
+ const lengths=await Promise.all(pages.map(page=>page.evaluate(()=>window.__spoken.length)));assert.equal(lengths[2],0,'management page stays silent');assert.equal(lengths[0]+lengths[1],1,'only one device starts speech');const speaking=lengths[0]?pages[0]:pages[1],waiting=lengths[0]?pages[1]:pages[0];const result=broadcastRows(state).find(r=>r.kind==='result'&&r.match===m.id&&r.sport==='gomoku');
+ for(let n=0;n<40;n++){await speaking.clock.runFor(500);await speaking.waitForTimeout(20);}assert.equal(await speaking.getByRole('button',{name:'关闭赛果播报'}).isEnabled(),false);assert.equal(delivered.length,0);
+ await finishSpeechText(speaking,result.text);await speaking.waitForTimeout(100);assert.ok(delivered.includes(result.deliveryId));for(let n=0;n<6;n++){await waiting.clock.runFor(500);await waiting.waitForTimeout(25);}assert.equal(await waiting.evaluate(()=>window.__spoken.length),0,'waiting screen observes completed cloud receipt');
+ const before=await speaking.evaluate(()=>window.__spoken.join(''));state.tournaments.gomoku.results[m.id].updatedAt=new Date((await speaking.evaluate(()=>Date.now()))+1000).toISOString();state.revision=crypto.randomUUID();await speaking.evaluate(()=>window.dispatchEvent(new Event('online')));for(let n=0;n<8;n++){await speaking.clock.runFor(500);await speaking.waitForTimeout(20);}assert.equal(await speaking.evaluate(()=>window.__spoken.join('')),before,'metadata-only revision does not replay completed result');assert.equal(before,result.text,'all phrases match the full result text');assert.deepEqual(errors,[]);console.log('PASS: two devices share one result owner; controller silent; long result retains popup; complete transcript before receipt; other display sees receipt without speaking; metadata-only revision does not repeat.');
+}finally{await browser.close();}

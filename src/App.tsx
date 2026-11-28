@@ -1,4 +1,6 @@
-import {reserveResult,finishResultVisual,discardResult} from './broadcast-order';
+import {reserveResult,refreshResult,finishResultVisual,discardResult} from './broadcast-order';
+import {pendingResultJobs,rememberResultJob,forgetResultJob,resultDeliveryId,resultWasDelivered} from './result-delivery';
+import {flushBroadcastReceipts} from './broadcast-lease';
 import {BroadcastConsole} from './BroadcastConsole';
 import {setResultSpeechEnabled} from './SpeechControls';
 import {DataTable} from './DataTable';
@@ -23,7 +25,7 @@ import { Board } from './Board';
 import { EventClock } from './EventClock';
 import { OverviewHero } from './OverviewHero';
 import { ThemeToggle } from './ThemeToggle';
-import { Arena, completedChanges, ResultBroadcast } from './Arena';
+import { Arena, completedChanges, recoverAnnouncements, ResultBroadcast } from './Arena';
 import type { Announcement } from './Arena';
 import { useCloud, cloudEnabled,eventId,eventUrl } from './cloud';
 import { AccountPanel } from './AccountPanel';
@@ -60,16 +62,20 @@ export function App() {
   const [projection,setProjection] = useState(new URLSearchParams(location.search).has('screen'));
   const cloud=useCloud(); const [saving,setSaving]=useState(false); const [account,setAccount]=useState(false); const [announcement,setAnnouncement]=useState<Announcement|null>(null); const [queueTick,setQueueTick]=useState(0);const queue=useRef(new AnnouncementQueue<Announcement>()),previous=useRef<State|null>(null),initialRemote=useRef(false),formSignature=useRef('');
   const [queueOverride,setQueueOverride]=useState<boolean|null>(null);
-  useEffect(()=>setQueueOverride(null),[cloud.profile?.id,cloud.profile?.role]);
+  useEffect(()=>{setQueueOverride(null);setCallQueueEnabled(false);if(cloud.enabled&&!cloud.profile)return;try{const saved=JSON.parse(localStorage.getItem('qi-broadcast-queues-v1:'+eventId+':'+(cloud.profile?.id??'local'))||'null');if(saved&&typeof saved.results==='boolean'&&typeof saved.calls==='boolean'){setQueueOverride(saved.results);setCallQueueEnabled(saved.calls);}}catch{}},[cloud.profile?.id,cloud.profile?.role]);
   const queueEnabled=queueOverride??defaultQueueEnabled(cloud.profile?.role,cloud.enabled,projection);
   const [viewStarted]=useState(()=>Date.now());
   const queueSince=cloud.signedInAt?Date.parse(cloud.signedInAt):viewStarted;
   const orderedResults=useRef(new Set<string>());
-  function closeAnnouncement(){if(announcement&&orderedResults.current.has(announcement.key)){finishResultVisual(eventId,announcement.key);orderedResults.current.delete(announcement.key);}setAnnouncement(null);}
-  function toggleQueue(){setQueueOverride(!queueEnabled);if(queueEnabled){for(const key of orderedResults.current)discardResult(eventId,key);orderedResults.current.clear();setAnnouncement(null);queue.current.next(()=>false);}}
+  function closeAnnouncement(){if(announcement){if(resultWasDelivered(eventId,resultDeliveryId(announcement)))forgetResultJob(eventId,announcement.key);if(orderedResults.current.has(announcement.key)){finishResultVisual(eventId,announcement.key);orderedResults.current.delete(announcement.key);}}setAnnouncement(null);}
+  function saveQueuePreferences(results:boolean,calls:boolean){try{localStorage.setItem('qi-broadcast-queues-v1:'+eventId+':'+(cloud.profile?.id??'local'),JSON.stringify({results,calls}));}catch{}}
+  function toggleQueue(){saveQueuePreferences(!queueEnabled,callQueueEnabled);setQueueOverride(!queueEnabled);}
+  function toggleCallQueue(){saveQueuePreferences(queueEnabled,!callQueueEnabled);setCallQueueEnabled(!callQueueEnabled);}
   useEffect(()=>{const release=()=>{for(const key of orderedResults.current)discardResult(eventId,key);orderedResults.current.clear();};window.addEventListener('pagehide',release);return()=>{window.removeEventListener('pagehide',release);release();};},[projection,queueEnabled]);
   const canAdmin=!cloud.enabled||(cloud.profile?.role==='admin'||cloud.profile?.role==='superadmin'),canRecord=!cloud.enabled||cloud.profile?.role==='admin'||cloud.profile?.role==='superadmin'||cloud.profile?.role==='referee';
   useEffect(()=>{if(canAdmin)setResultSpeechEnabled(queueEnabled);},[canAdmin,queueEnabled]);
+  useEffect(()=>{if(!canAdmin||!projection)return;const controller=new AbortController();const flush=()=>void flushBroadcastReceipts(controller.signal).catch(()=>{});flush();const timer=setInterval(flush,5000);return()=>{clearInterval(timer);controller.abort();};},[canAdmin,projection]);
+  useEffect(()=>{const timer=setInterval(()=>{for(const key of orderedResults.current)refreshResult(eventId,key);},5000);return()=>clearInterval(timer);},[]);
   const [state, setState] = useState<State>(BOOT.state), stateRef = useRef(state);
   stateRef.current = state;
   const automaticBackup=useAutoBackup(state,canAdmin&&!cloud.loading,cloud.enabled,cloud.status==='云端已同步',eventId);
@@ -106,8 +112,10 @@ export function App() {
   const allCount = matches.length ? matches.filter(m=>!m.bye).length : Math.max(0, tournament.players.length - 1), currentRound = rounds.findIndex(r => r.some(m => !m.resolved));
   const flash = (text: string) => { setNotice(text); setTimeout(() => setNotice(''), 4500); };
   useEffect(()=>{if(cloud.remote){if(!initialRemote.current){previous.current=cloud.remote;initialRemote.current=true;}setState(cloud.remote);}},[cloud.remote]);
-  useLayoutEffect(()=>{if(previous.current){const changes=queue.current.reserve(completedChanges(previous.current,state));for(const event of changes)if(projection&&queueEnabled&&resultAfterLogin(event.match.result?.updatedAt,queueSince)){reserveResult(eventId,event.key);orderedResults.current.add(event.key);}if(changes.length)setTimeout(()=>{queue.current.append(changes);setQueueTick(n=>n+1);},2000);}previous.current=state;},[state]);
-  useEffect(()=>{if(!announcement){const event=queue.current.next(event=>{const t=stateRef.current.tournaments[event.sport];const valid=queueEnabled&&resultAfterLogin(event.match.result?.updatedAt,queueSince)&&t.drawnAt===event.drawnAt&&t.results[event.match.id]?.updatedAt===event.match.result?.updatedAt;if(!valid){discardResult(eventId,event.key);orderedResults.current.delete(event.key);}return valid;});if(event)setAnnouncement(event);}},[queueTick,announcement,queueEnabled,queueSince]);
+  useLayoutEffect(()=>{if(previous.current){const changes=queue.current.reserve(completedChanges(previous.current,state));for(const event of changes)if(canAdmin&&queueEnabled&&resultAfterLogin(event.match.result?.updatedAt,queueSince)){rememberResultJob(eventId,event.key);if(projection){reserveResult(eventId,event.key);orderedResults.current.add(event.key);}}if(changes.length)setTimeout(()=>{queue.current.append(changes);setQueueTick(n=>n+1);},2000);}previous.current=state;},[state]);
+  useEffect(()=>{if(!canAdmin||!queueEnabled||!projection||cloud.loading||(cloud.enabled&&state!==cloud.remote))return;const jobs=pendingResultJobs(eventId),valid=recoverAnnouncements(state).filter(e=>resultAfterLogin(e.match.result?.updatedAt,queueSince)),keys=new Set(valid.map(e=>e.key));for(const key of jobs)if(!keys.has(key)){forgetResultJob(eventId,key);discardResult(eventId,key);orderedResults.current.delete(key);}const recovered=valid.filter(e=>jobs.includes(e.key)&&!resultWasDelivered(eventId,resultDeliveryId(e)));for(const e of recovered)if(!orderedResults.current.has(e.key)){reserveResult(eventId,e.key);orderedResults.current.add(e.key);}const missing=queue.current.reserve(recovered);if(missing.length){queue.current.append(missing);setQueueTick(n=>n+1);}},[state,projection,queueEnabled,canAdmin,cloud.loading]);
+  useEffect(()=>{if(!queueEnabled||(!projection&&canAdmin))return;if(!announcement){const event=queue.current.next(event=>{const t=stateRef.current.tournaments[event.sport];const valid=resultAfterLogin(event.match.result?.updatedAt,queueSince)&&t.drawnAt===event.drawnAt&&t.results[event.match.id]?.updatedAt===event.match.result?.updatedAt;if(!valid){if(orderedResults.current.has(event.key))discardResult(eventId,event.key);forgetResultJob(eventId,event.key);orderedResults.current.delete(event.key);}return valid;});if(event){if(projection&&canAdmin){rememberResultJob(eventId,event.key);if(!orderedResults.current.has(event.key)){reserveResult(eventId,event.key);orderedResults.current.add(event.key);}}setAnnouncement(event);}}},[queueTick,announcement,queueEnabled,queueSince,projection,canAdmin]);
+  useEffect(()=>{if(!announcement)return;const t=state.tournaments[announcement.sport];if(t.drawnAt!==announcement.drawnAt||t.results[announcement.match.id]?.updatedAt!==announcement.match.result?.updatedAt){forgetResultJob(eventId,announcement.key);discardResult(eventId,announcement.key);orderedResults.current.delete(announcement.key);setAnnouncement(null);}},[state,announcement]);
   useEffect(() => {
     if(cloud.enabled)return;
     const sync = (e: StorageEvent) => { if (e.key !== KEY || !e.newValue) return; try { const next = validateState(JSON.parse(e.newValue)); setState(next); if (!projection) flash('赛事已同步另一窗口的更新。'); } catch { setError('另一窗口的数据异常，请检查备份。'); } };
@@ -281,8 +289,8 @@ export function App() {
     {notice&&<div className="toast" role="status"><CheckCircle2 size={18}/>{notice}<button onClick={()=>setNotice('')} aria-label="关闭提示"><X size={15}/></button></div>}
     {celebrate&&<div className="confetti" aria-hidden="true">{Array.from({length:48},(_,i)=><i key={i} style={{left:`${(i*37)%100}%`,animationDelay:`${(i%8)*.1}s`,background:['#ec784c','#e5bd64','#4c7967','#f0c6ac'][i%4],transform:`rotate(${i*23}deg)`}}/>)}</div>}
     {account&&<Modal title="账号与权限中心" subtitle="管理员统一分配账号 · 手机实时录分" close={closeAccount}><AccountPanel onWorkState={(busy,unsaved)=>{accountWork.current={busy,unsaved};}} profile={cloud.profile} call={cloud.call} onChanged={()=>void cloud.refresh()}/></Modal>}
-    {announcement&&queueEnabled&&<ResultBroadcast key={announcement.key} event={announcement} speakEnabled={projection} onConsole={canAdmin&&hasSelectedEvent?()=>setBroadcastConsole(true):undefined} onClose={closeAnnouncement}/>}
-    {broadcastConsole&&canAdmin&&hasSelectedEvent&&<BroadcastConsole state={state} call={cloud.call} onBack={()=>setBroadcastConsole(false)} projection={projection} onToggleCallQueue={()=>setCallQueueEnabled(!callQueueEnabled)} queueEnabled={queueEnabled} onToggleQueue={toggleQueue} callQueueEnabled={callQueueEnabled&&canAdmin} queueSince={queueSince}/>}
+    {announcement&&queueEnabled&&(projection||!canAdmin)&&<ResultBroadcast key={announcement.key} event={announcement} speakEnabled={projection&&canAdmin} onConsole={canAdmin&&hasSelectedEvent?()=>setBroadcastConsole(true):undefined} onClose={closeAnnouncement}/>}
+    {broadcastConsole&&canAdmin&&hasSelectedEvent&&<BroadcastConsole state={state} call={cloud.call} onBack={()=>setBroadcastConsole(false)} projection={projection} onToggleCallQueue={toggleCallQueue} queueEnabled={queueEnabled} onToggleQueue={toggleQueue} callQueueEnabled={callQueueEnabled&&canAdmin} queueSince={queueSince}/>}
     {saving&&<div className="saving-indicator" role="status">正在提交云端，请稍候…</div>}
   </div>;
 }

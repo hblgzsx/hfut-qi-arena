@@ -7,6 +7,9 @@ test('播报控制台只重播当前有效赛果，已开赛、结束、取消�
  let state=demoState();state.schedule=emptySchedule();state.schedule.counts={gomoku:2,junqi:1};state.schedule.bindings={a:['gomoku:1'],b:['gomoku:2'],c:['junqi:1']};state=prepareDraw(state,'gomoku',[],[],'broadcast-data');state=prepareDraw(state,'junqi',[],[],'broadcast-j');state.schedule!.running=true;state=dispatchTables(state);
  const a=state.schedule!.assignments[0],call=state.schedule!.calls.find(c=>c.assignment===a.id)!;
  assert.equal(broadcastRows(state).find(r=>r.callId===call.id)?.valid,true);
+ const match=buildBracket(state.tournaments[a.sport]).flat().find(m=>m.id===a.match)!;assert.ok(call.text.includes(match.bestOf===1?'一局定胜负':'三局两胜'));
+ const legacy=structuredClone(state);legacy.schedule!.calls.find(c=>c.id===call.id)!.text='旧版叫号';assert.ok(broadcastRows(legacy).find(r=>r.callId===call.id)!.text.includes(match.bestOf===1?'一局定胜负':'三局两胜'));
+ const rules=structuredClone(state),tournament=rules.tournaments[a.sport];tournament.rules={bronzeCount:2,preliminary:1,quarterfinal:3,semifinal:3,final:3,bronze:3,overrides:{[a.match]:match.bestOf===1?3:1}};assert.ok(broadcastRows(rules).find(r=>r.callId===call.id)!.text.includes(match.bestOf===1?'三局两胜':'一局定胜负'));
  for(const status of ['playing','finished','cancelled'] as const){const s=structuredClone(state);s.schedule!.assignments[0].status=status;assert.equal(broadcastRows(s).find(r=>r.callId===call.id)?.valid,false);}
  const redraw=structuredClone(state);redraw.schedule!.draws[a.sport]='old';assert.equal(broadcastRows(redraw).find(r=>r.callId===call.id)?.valid,false);
  const mismatch=structuredClone(state);mismatch.schedule!.assignments[0].players.reverse();assert.equal(broadcastRows(mismatch).find(r=>r.callId===call.id)?.valid,false);

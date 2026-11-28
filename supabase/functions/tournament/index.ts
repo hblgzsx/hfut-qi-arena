@@ -61,9 +61,13 @@ Deno.serve(async req=>{
     }
     if(body.action==='voice-claim'){
       if(!admin)return reply({error:'请在主屏登录管理员后启用叫号语音'},403);
-      const {data,error}=await db.rpc('arena_call_claim',{p_event:eventId,p_owner:String(body.owner??''),p_ack:String(body.ack??'')});
+      const owner=String(body.owner??'');if(!/^[a-f0-9-]{36}$/.test(owner))return reply({error:'无效播报设备'},400);
+      if(body.statusOnly===true){const {data,error}=await db.from('arena_call_delivery').select('owner,delivered,lease_until').eq('event_id',eventId).maybeSingle();if(error)throw error;return reply({owned:!data||data.owner===owner||Date.parse(data.lease_until??'')<=Date.now(),delivered:data?.delivered??[],leaseUntil:data?.lease_until});}
+      if(body.takeover===true){const {error}=await db.from('arena_call_delivery').update({owner,lease_until:new Date(Date.now()+120000).toISOString()}).eq('event_id',eventId);if(error)throw error;}
+      const {data,error}=await db.rpc('arena_call_claim',{p_event:eventId,p_owner:owner,p_ack:String(body.ack??'')});
       if(error)throw error;
-      return reply(data);
+      const {data:delivery,error:readError}=await db.from('arena_call_delivery').select('delivered,lease_until').eq('event_id',eventId).maybeSingle();if(readError)throw readError;
+      return reply({...data,delivered:delivery?.delivered??data.delivered??[],leaseUntil:delivery?.lease_until});
     }
     if(['backups','backup-download','backup-now'].includes(body.action)){
       if(!admin)return reply({error:'仅管理员可管理赛事备份'},403);

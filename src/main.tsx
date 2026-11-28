@@ -13,4 +13,5 @@ import './workspace.css';
 import './referee-management.css';
 import './data-tables.css';
 import './draw-studio.css';
+import './table-match.css';
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);

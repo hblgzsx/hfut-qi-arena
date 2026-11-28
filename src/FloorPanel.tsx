@@ -9,26 +9,29 @@ import {X} from 'lucide-react';
 import {CheckinDesk} from './CheckinDesk';
 import {DataTable} from './DataTable';
 import {DrawStudio} from './DrawStudio';
+import {TableMatchDialog} from './TableMatchDialog';
 import {validateNewEventPassword} from './event-password';
 
-export function FloorBoard({state,onRecord,userId}:{state:State;onRecord?:(sport:Sport,id:string)=>void;userId?:string}) {
+export function FloorBoard({state,onRecord,onBegin,onCancel,userId}:{state:State;onRecord?:(sport:Sport,id:string)=>void;onBegin?:(assignment:string)=>Promise<void>;onCancel?:(assignment:string)=>void;userId?:string}) {
   const s=state.schedule??emptySchedule();
-  return <div className="floor-grid">{SPORTS.map(sport=><section key={sport}>
+  const [selected,setSelected]=useState<string|null>(null);
+  const selectedAssignment=s.assignments.find(a=>a.id===selected),mayOperate=(key:string)=>!userId||s.bindings[userId]?.includes(key);
+  return <><div className="floor-grid">{SPORTS.map(sport=><section key={sport}>
     <h2>{SPORT_NAMES[sport]} <small>{s.counts[sport]} 张棋盘</small></h2>
     <div className="floor-tables" style={{gridTemplateRows:`repeat(${Math.ceil(s.counts[sport]/(sport==='gomoku'?2:1))},minmax(0,1fr))`}}>{Array.from({length:s.counts[sport]},(_,i)=>{
       const table=i+1,key=tableKey(sport,table);
-      if(userId&&!s.bindings[userId]?.includes(key))return null;
       const a=s.assignments.find(a=>a.sport===sport&&a.table===table&&occupied(a));
       const names=a?.players.map(id=>state.tournaments[sport].players.find(p=>p.id===id)?.name??'待确认选手');
       const status=a?(a.status==='playing'?'进行中':'已叫号 · 等待开赛'):'空闲 · 等待可上场对局';
-      const note=a?.match??'选手需休息满 3 分钟，兼项不冲突';
-      return <button className={'floor-card '+(a?'occupied':'idle')} key={key} disabled={!a||!onRecord} title={[tableName(sport,table),status,names?.join(' / '),note].filter(Boolean).join(' · ')} onClick={()=>a&&onRecord?.(sport,a.match)}>
+      const interactive=!!a&&mayOperate(key)&&!!(onBegin||onRecord||onCancel);
+      const note=a?a.match+(interactive?(a.status==='called'?' · 点击确认开赛':' · 点击录入成绩'):''):'选手需休息满 3 分钟，兼项不冲突';
+      return <button className={'floor-card '+(a?'occupied':'idle')} key={key} disabled={!interactive} aria-label={tableName(sport,table)+(a?' · '+a.match+' · '+status:' · 空闲')} title={[tableName(sport,table),status,names?.join(' / '),note].filter(Boolean).join(' · ')} onClick={()=>a&&setSelected(a.id)}>
         <div className="floor-card-body"><b className="floor-card-table">{tableName(sport,table)}</b><span className="floor-card-status">{status}</span>
         <strong className="floor-card-duel">{names?<><span title={names[0]}>{names[0]}</span><i>VS</i><span title={names[1]}>{names[1]}</span></>:<span>等待对局</span>}</strong><small className="floor-card-note" title={note}>{note}</small></div>
       </button>;
     })}</div>
     <p>候场 {s.queues[sport].filter(id=>buildBracket(state.tournaments[sport]).flat().some(m=>m.id===id&&m.ready&&!m.resolved)&&!s.assignments.some(a=>a.sport===sport&&a.match===id&&occupied(a))).length} 场</p>
-  </section>)}</div>;
+  </section>)}</div>{selected&&selectedAssignment&&mayOperate(tableKey(selectedAssignment.sport,selectedAssignment.table))&&<TableMatchDialog key={selected} state={state} assignment={selected} onBegin={onBegin} onRecord={onRecord} onCancel={onCancel} onClose={()=>setSelected(null)}/>}</>;
 }
 
 export function FloorPanel({state,call,onChanged,owner='local'}:{state:State;call:(action:string,payload?:Record<string,unknown>)=>Promise<any>;onChanged:()=>void;owner?:string}) {
@@ -96,8 +99,8 @@ export function FloorPanel({state,call,onChanged,owner='local'}:{state:State;cal
     </details>
     <button className="button primary" disabled={busy} onClick={()=>void run({type:'start'})}>开始 / 恢复自动叫号</button>
     <button className="button secondary" disabled={busy||!s.running} onClick={()=>void run({type:'pause'})}>暂停补台，保留现场对局</button>
-    <FloorBoard state={state}/>
-    {s.assignments.filter(a=>a.status==='called').map(a=><div key={a.id}>{tableName(a.sport,a.table)} · {a.match} <button disabled={busy} onClick={()=>void run({type:'begin',assignment:a.id})}>双方到齐 · 开赛</button><button disabled={busy} onClick={()=>void run({type:'cancel',assignment:a.id})}>取消叫号并暂停调度</button></div>)}
+    <p className="composer-hint">点击对应棋盘即可确认双方到齐并开赛，不需要输入赛事密码。取消叫号仍需验证密码和原因。</p>
+    <FloorBoard state={state} onBegin={async assignment=>{await call('schedule',{command:{type:'begin',assignment},expectedRevision:state.revision});onChanged();}} onCancel={assignment=>void run({type:'cancel',assignment})}/>
     </section>}
     {tab==='documents'&&<>{dirty&&<p className="wizard-error">有未保存的裁判编排，此处导出上一次已保存的正式安排。请先回到“棋盘与裁判”保存。</p>}<EventDocuments state={state} members={members}/></>}
     <p role="status">{message}</p>

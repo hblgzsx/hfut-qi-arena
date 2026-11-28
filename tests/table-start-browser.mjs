@@ -1,0 +1,31 @@
+import {chromium} from 'playwright';
+import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import {demoState,validateState} from '../src/engine.ts';
+import {defaultEvent} from '../src/event-settings.ts';
+import {emptySchedule,prepareDraw,dispatchTables} from '../src/scheduling.ts';
+import {scheduleAction,mayScoreTable} from '../src/schedule-actions.ts';
+const browser=await chromium.launch({channel:'msedge',headless:true}),errors=[],requests=[];
+const time=ms=>new Date(ms+8*3600000).toISOString().slice(0,16),output=process.env.TABLE_OUTPUT||'tmp';
+let state=demoState();state.event={...defaultEvent(),startsAt:time(Date.now()-60000),endsAt:time(Date.now()+3600000)};state.schedule=emptySchedule();state.schedule.counts={gomoku:2,junqi:1};state.schedule.bindings={judge:['gomoku:1'],other:['gomoku:2'],army:['junqi:1']};for(const sp of ['gomoku','junqi'])state=prepareDraw(state,sp,[],[],'table-start-'+sp);state.schedule.running=true;state=validateState(dispatchTables(state));let fail=true;
+async function open(role){const page=await browser.newPage({viewport:{width:1366,height:900}});page.on('pageerror',e=>errors.push(e.message));if(role!=='public')await page.addInitScript(()=>localStorage.setItem('sb-nwvxamfgfbqbmamqfjcr-auth-token',JSON.stringify({access_token:'fixture',refresh_token:'fixture',expires_at:Math.floor(Date.now()/1000)+3600,user:{id:'judge'}})));
+ await page.route('**/auth/v1/**',r=>r.fulfill({json:{user:{id:'judge'}}}));await page.routeWebSocket('wss://**/*',ws=>ws.onMessage(()=>{}));await page.route('**/rest/v1/public_events*',r=>r.fulfill({json:{state}}));
+ await page.route('**/functions/v1/tournament',r=>{const b=r.request().postDataJSON();requests.push(b);if(b.action==='events')return r.fulfill({json:{events:[{id:'table-test',...state.event}],serverNow:Date.now()}});if(b.action==='members')return r.fulfill({json:{profiles:[]}});if(b.action==='schedule'){
+ if(role==='referee'){const a=state.schedule.assignments.find(a=>a.id===b.command.assignment);assert.ok(mayScoreTable(state,'judge',a.sport,a.match));}
+ if(fail){fail=false;return r.fulfill({status:409,json:{error:'现场刚有更新，请再次核对'}});}assert.equal(b.expectedRevision,state.revision);assert.equal(b.password,undefined);state=validateState(scheduleAction(state,b.command));state.revision=crypto.randomUUID();}
+ return r.fulfill({json:{state,profile:{id:'judge',role,display_name:'现场测试管理员'}}});});
+ await page.goto('http://127.0.0.1:4291/?event=table-test&screen=1&view=both');await page.getByRole('button',{name:'棋盘总览',exact:true}).click();await page.locator('.arena-floor .floor-card').nth(2).waitFor();return page;}
+const own=()=>state.schedule.assignments.find(a=>a.sport==='gomoku'&&a.table===1),other=()=>state.schedule.assignments.find(a=>a.sport==='gomoku'&&a.table===2);
+try{
+ const admin=await open('superadmin'),card=admin.getByRole('button',{name:/^五子棋 1 号桌 ·/}),dialog=admin.getByRole('dialog',{name:'棋盘对局操作'});
+ await card.click();await dialog.waitFor();assert.match(await dialog.innerText(),new RegExp(own().match));for(const id of own().players)assert.ok((await dialog.innerText()).includes(state.tournaments.gomoku.players.find(p=>p.id===id).name));assert.equal(requests.filter(b=>b.action==='schedule').length,0);assert.equal(await dialog.getByLabel('当前赛事密码').count(),0);
+ await fs.mkdir(output,{recursive:true});await admin.screenshot({path:output+'/大屏确认开赛-桌面.png'});await admin.setViewportSize({width:390,height:844});assert.equal(await admin.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await admin.screenshot({path:output+'/大屏确认开赛-手机.png'});
+ await dialog.getByRole('button',{name:'关闭棋盘对局'}).click();assert.equal(own().status,'called');await card.click();await dialog.getByRole('button',{name:'双方到齐，确认开赛',exact:true}).click();await dialog.getByRole('alert').filter({hasText:'现场刚有更新'}).waitFor();assert.equal(own().status,'called');await dialog.getByRole('button',{name:'双方到齐，确认开赛',exact:true}).click();await dialog.waitFor({state:'hidden'});assert.equal(own().status,'playing');assert.equal(other().status,'called');await card.click();await dialog.getByRole('button',{name:'录入本场成绩',exact:true}).waitFor();assert.equal(await dialog.getByRole('button',{name:'双方到齐，确认开赛',exact:true}).count(),0);await dialog.getByRole('button',{name:'关闭棋盘对局'}).click();
+ await admin.getByRole('button',{name:/^五子棋 2 号桌 ·/}).click();await dialog.getByRole('button',{name:'录入弃权 / 已有成绩',exact:true}).click();await admin.getByRole('dialog',{name:'记录每一场精彩'}).getByLabel('成绩类型').selectOption('forfeit');assert.equal(other().status,'called');assert.equal(requests.filter(b=>b.action==='schedule').length,2);await admin.close();
+ // Read-only viewers and unrelated tables never obtain a start action.
+ const viewer=await open('public');assert.equal(await viewer.locator('.arena-floor .floor-card:not(:disabled)').count(),0);await viewer.close();
+ own().status='called';state.revision=crypto.randomUUID();const judge=await open('referee');assert.equal(await judge.locator('.arena-floor .floor-card:not(:disabled)').count(),1);assert.equal(await judge.getByRole('button',{name:/^五子棋 2 号桌 ·/}).isEnabled(),false);await judge.getByRole('button',{name:/^五子棋 1 号桌 ·/}).click();await judge.getByRole('dialog',{name:'棋盘对局操作'}).getByRole('button',{name:'双方到齐，确认开赛',exact:true}).click();await judge.getByRole('dialog',{name:'棋盘对局操作'}).waitFor({state:'hidden'});assert.equal(own().status,'playing');await judge.close();
+ // Old call cannot confirm the same table's replacement match.
+ const late=await open('superadmin');await late.getByRole('button',{name:/^五子棋 2 号桌 ·/}).click();const old=other();old.status='cancelled';state.revision=crypto.randomUUID();await late.waitForFunction(()=>document.querySelector('.table-match-dialog')?.textContent.includes('这次叫号已变化'),{timeout:20000});assert.equal(await late.getByRole('dialog',{name:'棋盘对局操作'}).getByRole('button',{name:'双方到齐，确认开赛',exact:true}).count(),0);
+ assert.deepEqual(errors,[]);console.log('PASS: big-screen card -> table and players -> password-free start; view/cancel no mutation; failed save stays pending; correct assignment only; playing opens score; absent route never marks both present; public/read-only and own-table permissions; stale call protected; mobile layout.');
+}finally{await browser.close();}

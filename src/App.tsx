@@ -4,7 +4,7 @@ import {EventLobby} from './EventLobby';
 import {AutoBackupPanel,useAutoBackup} from './AutoBackup';
 import {backupSettings} from './event-settings';
 import {FloorPanel,FloorBoard,EventGate} from './FloorPanel';
-import {scheduleProtected,mayScoreTable,replaceRegistration} from './schedule-actions';
+import {scheduleAction,scheduleProtected,mayScoreTable,replaceRegistration} from './schedule-actions';
 import {recordReady} from './record-data';
 import {BackdropPanel} from './BackdropPanel';
 import {RulesEditor} from './RulesEditor';
@@ -131,10 +131,23 @@ export function App() {
     if(id)formSignature.current=matchSignature(stateRef.current,sport,id);
     setSelected(id??null);setSearch('');setModal('record');
   }
+  async function beginTable(assignment:string){
+    if(!canRecord)throw new Error('请先登录管理员或负责本桌的裁判账号。');
+    const current=stateRef.current,a=current.schedule?.assignments.find(a=>a.id===assignment);
+    if(!a||a.status!=='called')throw new Error('叫号已变化，请核对最新棋盘状态。');
+    if(cloud.profile?.role==='referee'&&!mayScoreTable(current,cloud.profile.id,a.sport,a.match))throw new Error('只能确认自己负责棋盘的对局。');
+    if(cloud.enabled){const data=await cloud.call('schedule',{command:{type:'begin',assignment},expectedRevision:current.revision});if(data?.state){const next=validateState(data.state);stateRef.current=next;setState(next);}await cloud.refresh();}
+    else if(!await commit(scheduleAction(current,{type:'begin',assignment}),'已确认双方到齐并开赛：'+a.match,a.sport))throw new Error('开赛确认未保存，请核对最新赛况。');
+  }
   function arenaRecord(s:Sport,id?:string){
     if(!canRecord){setAccount(true);return;}
     if(id&&cloud.profile?.role==='referee'&&!mayScoreTable(stateRef.current,cloud.profile.id,s,id))return flash('只能操作自己负责棋盘的对局。');
     setSport(s);setSelected(id??null);formSignature.current=id?matchSignature(stateRef.current,s,id):'';setSearch('');setModal(id&&canAdmin?'decision':'record');
+  }
+  function arenaTableRecord(s:Sport,id:string){
+    if(!canRecord){setAccount(true);return;}
+    if(cloud.profile?.role==='referee'&&!mayScoreTable(stateRef.current,cloud.profile.id,s,id))return flash('只能操作自己负责棋盘的对局。');
+    arenaRecord(s,id);setModal('record');
   }
   function exitArena(){if(document.fullscreenElement)void document.exitFullscreen();history.replaceState(null,'',location.pathname+'?event='+eventId);setProjection(false);setPage('bracket');}
   function enterArena(){setProjection(true);setPage('bracket');history.replaceState(null,'',location.pathname+'?event='+eventId+'&screen=1');}
@@ -187,7 +200,7 @@ export function App() {
       {!isLobby&&<div className="sidebar-event sidebar-university"><img src={`${import.meta.env.BASE_URL}brand/hfut-sidebar.svg`} alt="合肥工业大学校徽"/><strong>合肥工业大学</strong><span>{event.name}</span><div className="event-date"><Clock3 size={13}/>{eventTime(event)}</div></div>}
       <div className="sidebar-bottom" id="workspace-tools"><button onClick={()=>setBackdrop(true)}><Monitor size={17}/>颁奖背景 / PPTX</button>{canAdmin&&<button onClick={()=>setModal('event-new')}><Plus size={17}/>添加竞赛</button>}{canAdmin&&<><button onClick={()=>setAccount(true)}><Users size={17}/>裁判与权限管理</button><button onClick={()=>hasSelectedEvent?setPage('history'):setModal('event-trash')}><History size={17}/>{hasSelectedEvent?'操作记录':'已删除竞赛'} <ChevronRight size={14}/></button>{hasSelectedEvent&&<button onClick={()=>setModal('settings')}><Settings2 size={17}/>赛事设置与备份</button>}</>}<div className="profile"><div className="avatar">弈</div><div><b>赛事管理工作台</b><small><span className="dot"/> {cloud.enabled?'云端运行 · 实时同步':'本地运行 · 自动保存'}</small></div><ShieldCheck size={17}/></div></div>
     </aside>}
-    {projection&&<Arena state={state} initialSport={sport} onExit={exitArena} onRecord={arenaRecord} onAwards={()=>{exitArena();setPage('prizes');}} canRecord={canRecord} connection={cloud.status} queueEnabled={queueEnabled} onToggleQueue={toggleQueue} onBackdrop={()=>setBackdrop(true)} queueSince={queueSince}/>}
+    {projection&&<Arena state={state} initialSport={sport} onExit={exitArena} onRecord={arenaRecord} onTableRecord={arenaTableRecord} onBegin={beginTable} userId={cloud.profile?.role==='referee'?cloud.profile.id:undefined} onAwards={()=>{exitArena();setPage('prizes');}} canRecord={canRecord} connection={cloud.status} queueEnabled={queueEnabled} onToggleQueue={toggleQueue} onBackdrop={()=>setBackdrop(true)} queueSince={queueSince}/>}
     <div className="main-shell" data-sport={sport} style={projection?{display:'none'}:undefined}>
       <header className="topbar"><div className="breadcrumb">{isLobby?'赛事中心':event.name} <ChevronRight size={14}/><b>{projection?'现场大屏':pageTitle}</b></div><div className="topbar-right"><EventClock offset={serverOffset} showDate/><span className="local-badge"><i/> {cloud.status}</span><button className="button secondary small" aria-pressed={queueEnabled} title={'仅播放 '+new Date(queueSince).toLocaleString('zh-CN',{hour12:false})+' 之后的赛果'} onClick={toggleQueue}>{queueEnabled?'播报队列：开':'播报队列：关'}</button><button className="button secondary small" onClick={()=>setAccount(true)}><ShieldCheck size={14}/>{cloud.profile?.display_name??'邮箱登录'}</button>{!projection&&<button className="icon-button" aria-label="赛事帮助" title="赛事帮助" onClick={()=>setPage('rules')}><CircleHelp size={19}/></button>}<ThemeToggle/></div></header>
       <main>
